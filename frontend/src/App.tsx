@@ -9,6 +9,7 @@ import { HomePage } from "./pages/Home";
 import { OrderDetailPage, OrdersPage, TrackPage } from "./pages/OrdersPage";
 import { ProducersPage } from "./pages/ProducersPage";
 import { ProductPage } from "./pages/ProductPage";
+import { StoryPage } from "./pages/StoryPage";
 import { WholesalePage } from "./pages/WholesalePage";
 import { Link, matchPath, RouterProvider, useLocation } from "./router";
 import { StoreProvider } from "./store";
@@ -45,6 +46,7 @@ function Routes() {
   if (pathname === "/rastrear") return <TrackPage />;
   if (pathname === "/atacado") return <WholesalePage />;
   if (pathname === "/produtores") return <ProducersPage />;
+  if (pathname === "/nossa-historia") return <StoryPage />;
   return <NotFound />;
 }
 

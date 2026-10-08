@@ -7,7 +7,7 @@ import { useDebounced, useStore } from "../store";
 
 const NAV = [
   { to: "/produtos", label: "Produtos" },
-  { to: "/#historia", label: "Nossa história" },
+  { to: "/nossa-historia", label: "Nossa história" },
   { to: "/atacado", label: "Atacado" },
 ];
 

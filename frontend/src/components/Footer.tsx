@@ -30,7 +30,7 @@ export function Footer() {
           <nav aria-labelledby="footer-empresa">
             <h2 id="footer-empresa">Encantos da Serra</h2>
             <ul>
-              <li><Link to="/#historia">Nossa história</Link></li>
+              <li><Link to="/nossa-historia">Nossa história</Link></li>
               <li><Link to="/atacado">Atacado para empresas</Link></li>
               <li><Link to="/produtores">Seja um produtor parceiro</Link></li>
             </ul>
