@@ -1,14 +1,16 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db";
-import { requireAuth, requireRole } from "../lib/auth";
-import { conflict, notFound } from "../lib/errors";
+import { config } from "../config";
+import { adminAccess, currentUser } from "../lib/auth";
+import { badRequest, conflict, notFound } from "../lib/errors";
 import { slugify } from "../lib/text";
 import type { AppEnv } from "../lib/types";
 import { uploadPath } from "../lib/uploads";
 import { isUniqueViolation, validate } from "../lib/validate";
 import { findProduct, productSearchText } from "../repos/products";
 import { getOrder } from "../repos/checkout";
+import { applyMovement, inventoryOverview, ORDER_FILTERS, ordersBoard, productMovements, transitionOrder } from "../repos/inventory";
 
 const tierSchema = z.object({
   minBoxes: z.number().int().min(1),
@@ -39,10 +41,19 @@ const productSchema = z.object({
   tiers: z.array(tierSchema).min(1),
 });
 
+const movementSchema = z.object({
+  kind: z.enum(["entrada", "saida", "perda", "contagem"]),
+  quantity: z.number().int().min(0).max(1_000_000),
+  unit: z.enum(["unit", "box"]).default("unit"),
+  note: z.string().trim().max(300).optional(),
+});
+
 const orderStatusSchema = z.object({
   status: z.enum(["confirmed", "preparing", "in_transit", "delivered", "cancelled"]),
   message: z.string().trim().min(3).max(300),
   temperatureC: z.number().min(-10).max(30).optional(),
+  // Expede mesmo sem cobertura completa (passa na frente de pedidos mais antigos).
+  force: z.boolean().optional(),
 });
 
 async function replaceTiers(tx: any, productId: number, tiers: z.infer<typeof tierSchema>[]) {
@@ -55,7 +66,9 @@ async function replaceTiers(tx: any, productId: number, tiers: z.infer<typeof ti
 }
 
 export const adminRoutes = new Hono<AppEnv>()
-  .use(requireAuth, requireRole("admin"))
+  // Público: o painel pergunta se precisa de login.
+  .get("/access", (c) => c.json({ open: config().ADMIN_AUTH_DISABLED }))
+  .use(adminAccess)
 
   .get("/dashboard", async (c) => {
     const [summary] = await db()`
@@ -66,7 +79,8 @@ export const adminRoutes = new Hono<AppEnv>()
         (select count(*)::int from quote_requests where status = 'open') as "openQuotes",
         (select count(*)::int from supplier_proposals where status in ('submitted', 'in_review')) as "proposalsToReview",
         (select count(*)::int from contact_messages where not handled) as "unreadMessages",
-        (select count(*)::int from products where active and stock_units < box_size * 5) as "lowStockProducts"`;
+        (select count(*)::int from products p join product_stock ps on ps.product_id = p.id
+           where p.active and ps.available < p.min_stock_units) as "lowStockProducts"`;
     return c.json({ summary });
   })
 
@@ -82,9 +96,12 @@ export const adminRoutes = new Hono<AppEnv>()
           values (${b.slug ?? slugify(b.name)}, ${b.sku}, ${b.name}, ${b.description ?? null}, ${b.producerId},
             ${b.categoryId}, ${b.unitLabel}, ${b.weightGrams}, ${b.retailPriceCents}, ${b.boxSize}, ${b.milkType},
             ${b.detailTag ?? null}, ${b.cureDays ?? null}, ${b.badge ?? null}, ${b.awarded}, ${b.imageUrl ?? null},
-            ${b.stockUnits}, ${b.featured}, ${b.active}, ${productSearchText(b)})
+            0, ${b.featured}, ${b.active}, ${productSearchText(b)})
           returning id`;
         await replaceTiers(tx, row.id, b.tiers);
+        if (b.stockUnits > 0) {
+          await applyMovement(tx, { productId: row.id, kind: "entrada", delta: b.stockUnits, note: "Estoque inicial", userId: currentUser(c).id });
+        }
         return row.id as number;
       });
       return c.json({ product: await findProduct({ id }) }, 201);
@@ -96,7 +113,7 @@ export const adminRoutes = new Hono<AppEnv>()
 
   .patch(
     "/products/:id",
-    validate("json", productSchema.pick({ retailPriceCents: true, stockUnits: true, featured: true, active: true, badge: true, imageUrl: true, tiers: true }).partial()),
+    validate("json", productSchema.pick({ retailPriceCents: true, featured: true, active: true, badge: true, imageUrl: true, tiers: true }).partial()),
     async (c) => {
       const id = Number(c.req.param("id"));
       const b = c.req.valid("json");
@@ -104,7 +121,6 @@ export const adminRoutes = new Hono<AppEnv>()
         const [row] = await tx`
           update products set
             retail_price_cents = coalesce(${b.retailPriceCents ?? null}, retail_price_cents),
-            stock_units = coalesce(${b.stockUnits ?? null}, stock_units),
             featured = coalesce(${b.featured ?? null}, featured),
             active = coalesce(${b.active ?? null}, active),
             badge = coalesce(${b.badge ?? null}, badge),
@@ -118,36 +134,51 @@ export const adminRoutes = new Hono<AppEnv>()
     },
   )
 
-  // Pedidos: avanço de status + leitura de temperatura da cadeia fria.
-  .get("/orders", validate("query", z.object({ status: z.string().optional() })), async (c) => {
-    const { status } = c.req.valid("query");
-    const orders = await db()`
-      select o.code, o.channel, o.status, o.total_cents as "totalCents", o.scheduled_delivery::text as "scheduledDelivery",
-             o.created_at as "createdAt", u.name as "customerName"
-      from orders o join users u on u.id = o.user_id
-      where (${status ?? null}::text is null or o.status = ${status ?? null})
-      order by o.created_at desc limit 100`;
-    return c.json({ orders });
+  // Pedidos com cobertura de estoque e avanço de status.
+  .get("/orders", validate("query", z.object({ filter: z.enum(ORDER_FILTERS).default("open"), q: z.string().optional() })), async (c) => {
+    const { filter, q } = c.req.valid("query");
+    return c.json(await ordersBoard(filter, q));
   })
 
   .post("/orders/:code/events", validate("json", orderStatusSchema), async (c) => {
     const b = c.req.valid("json");
-    const orderId = await db().begin(async (tx) => {
-      const [order] = await tx`
-        update orders set status = ${b.status}, updated_at = now() where code = ${c.req.param("code")} returning id`;
-      if (!order) throw notFound("Pedido");
-      await tx`
-        insert into order_events (order_id, status, message, temperature_c)
-        values (${order.id}, ${b.status}, ${b.message}, ${b.temperatureC ?? null})`;
-      if (b.status === "cancelled") {
-        // Devolve o estoque reservado.
-        await tx`
-          update products p set stock_units = p.stock_units + i.units, sales_count = greatest(0, p.sales_count - i.units)
-          from order_items i where i.order_id = ${order.id} and i.product_id = p.id`;
-      }
-      return order.id as number;
+    const orderId = await transitionOrder(c.req.param("code"), b.status, {
+      message: b.message,
+      temperatureC: b.temperatureC,
+      userId: currentUser(c).id,
+      force: b.force,
     });
     return c.json({ order: await getOrder(orderId) });
+  })
+
+  // Estoque: físico x reservado x disponível, com cobertura dos pedidos abertos.
+  .get("/inventory", async (c) => c.json(await inventoryOverview()))
+
+  .get("/inventory/:productId/movements", async (c) => {
+    return c.json({ movements: await productMovements(Number(c.req.param("productId"))) });
+  })
+
+  .post("/inventory/:productId/movements", validate("json", movementSchema), async (c) => {
+    const productId = Number(c.req.param("productId"));
+    const b = c.req.valid("json");
+    const stockAfter = await db().begin(async (tx) => {
+      const [p] = await tx`select stock_units, box_size from products where id = ${productId} for update`;
+      if (!p) throw notFound("Produto");
+      const units = b.unit === "box" ? b.quantity * p.box_size : b.quantity;
+      // Contagem informa o total físico encontrado; os demais tipos informam a quantidade movimentada.
+      const delta = b.kind === "contagem" ? units - p.stock_units : b.kind === "entrada" ? units : -units;
+      if (delta === 0 && b.kind !== "contagem") throw badRequest("Quantidade precisa ser maior que zero");
+      return applyMovement(tx, { productId, kind: b.kind, delta, note: b.note, userId: currentUser(c).id });
+    });
+    return c.json({ stockAfter, ...(await inventoryOverview()) }, 201);
+  })
+
+  .patch("/inventory/:productId", validate("json", z.object({ minStockUnits: z.number().int().min(0).max(100_000) })), async (c) => {
+    const [row] = await db()`
+      update products set min_stock_units = ${c.req.valid("json").minStockUnits}, updated_at = now()
+      where id = ${Number(c.req.param("productId"))} returning id`;
+    if (!row) throw notFound("Produto");
+    return c.json(await inventoryOverview());
   })
 
   // Cotações B2B

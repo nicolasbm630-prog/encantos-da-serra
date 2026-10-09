@@ -3,6 +3,7 @@ import { db } from "../db";
 import { shippingCents } from "../lib/delivery";
 import { AppError, badRequest, forbidden } from "../lib/errors";
 import { priceLine, sumLines, type PurchaseMode } from "../lib/pricing";
+import { pgIntArray } from "../lib/query";
 import type { AuthUser } from "../lib/types";
 import { findProductsByIds, type ProductDto } from "./products";
 import { describeRegion, regionForCep } from "./delivery";
@@ -110,15 +111,22 @@ export async function createOrder(input: {
   const channel = hasBoxes ? "wholesale" : "retail";
 
   const orderId = await db().begin(async (tx) => {
-    // Baixa de estoque condicional: se outro pedido levou antes, a linha não é atualizada.
+    // Reserva: trava as linhas dos produtos (ordem fixa evita deadlock) e confere o disponível
+    // (físico − reservado). A baixa física só acontece na expedição.
+    const ids = [...new Set(priced.lines.map((l) => l.product.id))].sort((a, b) => a - b);
+    await tx.unsafe(`select id from products where id = any($1::int[]) order by id for update`, [pgIntArray(ids)]);
+    // Soma unidade + caixa do mesmo produto antes de conferir.
+    const needed = new Map<number, { units: number; name: string }>();
     for (const line of priced.lines) {
-      const updated = await tx`
-        update products set stock_units = stock_units - ${line.units}, sales_count = sales_count + ${line.units},
-               updated_at = now()
-        where id = ${line.product.id} and stock_units >= ${line.units} returning id`;
-      if (updated.length === 0) {
-        throw new AppError(409, "insufficient_stock", `Estoque insuficiente para ${line.product.name}`);
+      const prev = needed.get(line.product.id);
+      needed.set(line.product.id, { units: (prev?.units ?? 0) + line.units, name: line.product.name });
+    }
+    for (const [productId, { units, name }] of needed) {
+      const [stock] = await tx`select available from product_stock where product_id = ${productId}`;
+      if (!stock || stock.available < units) {
+        throw new AppError(409, "insufficient_stock", `Estoque insuficiente para ${name}`);
       }
+      await tx`update products set sales_count = sales_count + ${units}, updated_at = now() where id = ${productId}`;
     }
 
     const [order] = await tx`

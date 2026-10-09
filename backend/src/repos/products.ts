@@ -6,7 +6,7 @@ import { normalize } from "../lib/text";
 export const PRODUCT_COLUMNS = `
   p.id, p.slug, p.sku, p.name, p.description, p.unit_label, p.weight_grams, p.retail_price_cents,
   p.box_size, p.milk_type, p.detail_tag, p.cure_days, p.badge, p.awarded, p.image_url,
-  p.stock_units, p.featured, p.active, p.sales_count, p.created_at,
+  ps.available as stock_units, p.featured, p.active, p.sales_count, p.created_at,
   json_build_object('id', pr.id, 'slug', pr.slug, 'name', pr.name, 'city', pr.city, 'state', pr.state) as producer,
   json_build_object('id', c.id, 'slug', c.slug, 'name', c.name) as category,
   coalesce((
@@ -14,7 +14,9 @@ export const PRODUCT_COLUMNS = `
     from price_tiers t where t.product_id = p.id
   ), '[]'::json) as tiers`;
 
-export const PRODUCT_FROM = `from products p join producers pr on pr.id = p.producer_id join categories c on c.id = p.category_id`;
+// stock_units aqui é o DISPONÍVEL para venda (físico − reservado em pedidos abertos), via view product_stock.
+export const PRODUCT_FROM = `from products p join producers pr on pr.id = p.producer_id join categories c on c.id = p.category_id
+  join product_stock ps on ps.product_id = p.id`;
 
 export type ProductRow = {
   id: number;
@@ -82,8 +84,8 @@ export function toProductDto(row: ProductRow) {
       tiers,
     },
     stock: {
-      units: row.stock_units,
-      boxes: Math.floor(row.stock_units / row.box_size),
+      units: Math.max(0, row.stock_units),
+      boxes: Math.max(0, Math.floor(row.stock_units / row.box_size)),
       available: row.stock_units > 0,
     },
   };
@@ -131,7 +133,7 @@ export async function listProducts(f: ProductFilters) {
   if (f.maxWeight !== undefined) where.add((p) => `p.weight_grams <= ${p()}`, f.maxWeight);
   if (f.minWeight !== undefined) where.add((p) => `p.weight_grams >= ${p()}`, f.minWeight);
   if (f.featured) where.raw("p.featured");
-  if (f.inStock) where.raw("p.stock_units > 0");
+  if (f.inStock) where.raw("ps.available > 0");
 
   const page = f.page ?? 1;
   const pageSize = f.pageSize ?? 12;

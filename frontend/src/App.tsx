@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { AdminApp } from "./admin/AdminApp";
 import { CookieBanner, Toasts } from "./components/Chrome";
 import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
@@ -50,16 +51,34 @@ function Routes() {
   return <NotFound />;
 }
 
+function Shell() {
+  const { pathname } = useLocation();
+  // O painel tem layout próprio, sem cabeçalho/rodapé da loja.
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    return (
+      <>
+        <AdminApp />
+        <Toasts />
+      </>
+    );
+  }
+  return (
+    <>
+      <a href="#conteudo" className="skip-link">Pular para o conteúdo</a>
+      <Header />
+      <main id="conteudo" tabIndex={-1}><Routes /></main>
+      <Footer />
+      <Toasts />
+      <CookieBanner />
+    </>
+  );
+}
+
 export function App() {
   return (
     <RouterProvider>
       <StoreProvider>
-        <a href="#conteudo" className="skip-link">Pular para o conteúdo</a>
-        <Header />
-        <main id="conteudo" tabIndex={-1}><Routes /></main>
-        <Footer />
-        <Toasts />
-        <CookieBanner />
+        <Shell />
       </StoreProvider>
     </RouterProvider>
   );

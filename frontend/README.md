@@ -24,6 +24,8 @@ bun run build      # gera dist/ estático
 | `/pedidos`, `/pedidos/:code` | Meus pedidos e acompanhamento (linha do tempo, temperatura, lotes) |
 | `/rastrear` | Rastreio público com código + e-mail |
 | `/atacado` | Pedido rápido, calendário de rotas e minhas cotações |
+| `/admin` | Painel: pedidos com cobertura de estoque (coberto / parcial / sem estoque) e avanço de status |
+| `/admin/estoque` | Painel: físico, reservado e disponível por produto, movimentações e histórico |
 | `/produtores` | Programa de parceria + proposta com autosave e anexos |
 
 ## Estrutura

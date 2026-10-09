@@ -29,6 +29,10 @@ Use a URI do **Session pooler** (Supabase → Connect → Session pooler, porta 
 
 Todas as tabelas ficam com **RLS ligado e sem políticas**, ou seja, a REST pública do Supabase (`/rest/v1`) não enxerga nada, nem com a chave anon. Só o backend acessa os dados.
 
+## Painel admin sem login (temporário)
+
+`ADMIN_AUTH_DISABLED=true` no `.env` libera `/api/admin/*` sem login. As ações ficam registradas no primeiro usuário admin. **Antes de publicar, troque para `false`**: com isso, só contas `admin` acessam.
+
 ## Convenções
 
 - Dinheiro sempre em **centavos** (`priceCents`, `totalCents`).
@@ -50,13 +54,19 @@ Todas as tabelas ficam com **RLS ligado e sem políticas**, ou seja, a REST púb
 | Entrega | `GET /api/delivery/cep/:cep` (região, frete, próxima rota), `GET /api/delivery/routes` |
 | Produtor | `GET /api/supplier-proposals/options`, `POST /api/supplier-proposals`, `PATCH /:protocol` (autosave), `POST /:protocol/attachments`, `POST /:protocol/submit`. Use o header `X-Edit-Token` |
 | Contato | `POST /api/contact` |
-| Admin | `/api/admin/dashboard`, produtos, avanço de pedido com temperatura, resposta de cotações, análise de propostas |
+| Admin | `/api/admin/orders?filter=open\|uncovered\|in_transit\|…` (pedidos com cobertura de estoque), `POST /api/admin/orders/:code/events` (avança status), `/api/admin/inventory` (físico/reservado/disponível), `POST /api/admin/inventory/:id/movements` (entrada, perda, saída, contagem), `PATCH /api/admin/inventory/:id` (mínimo), cotações, propostas |
 
 ## Regras de negócio
 
 - **Atacado por faixa**: o preço por unidade depende do total de caixas do produto (ex.: 1–4, 5–11, 12+). A economia é calculada contra a 1ª faixa ("Você economiza R$ X nesta faixa").
 - **Compra por caixa** só para contas `business`. Pedido com caixa vira canal `wholesale`.
-- **Estoque** é baixado dentro da transação do pedido, com `update … where stock_units >= n`, então dois pedidos simultâneos não vendem o mesmo item. Cancelar devolve o estoque.
+- **Estoque em três números** (view `product_stock`):
+  - **físico** (`products.stock_units`): o que está na câmara fria;
+  - **reservado**: unidades em pedidos abertos (recebido, confirmado, em separação);
+  - **disponível** = físico − reservado: o que a loja vende.
+  O checkout trava as linhas dos produtos (`for update`) e só reserva se houver disponível. A **baixa física acontece na expedição**. Toda mudança no físico gera uma linha em `stock_movements` (entrada, saída, perda, contagem, expedição, devolução).
+- **Cobertura dos pedidos**: o estoque físico é distribuído entre os pedidos abertos por ordem de chegada (`src/lib/coverage.ts`). Um pedido fica coberto, parcial ou sem estoque. Expedir um pedido que não está coberto exige `force: true`, porque passa na frente de pedidos mais antigos.
+- **Fluxo do pedido**: recebido → confirmado → em separação → em rota → entregue (cancelado a partir de qualquer etapa antes de entregue). Pular etapas é bloqueado. Cancelar antes da expedição só libera a reserva; depois dela, devolve ao físico.
 - **Rota de entrega**: cada região tem faixa de CEP, dias de rota e prazo de corte. A data prevista é a próxima rota depois do corte, no fuso `America/Sao_Paulo`.
 - **Proposta de produtor**: rascunho sem login (protocolo + token secreto), anexos PDF/JPG/PNG até 10 MB validados pela assinatura do arquivo, envio exige as 3 etapas completas.
 - **Rastreabilidade**: cada item de pedido guarda o lote mais recente do produto (origem, data de produção, cura).

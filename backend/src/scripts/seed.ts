@@ -2,6 +2,7 @@ import { closeDb, db } from "../db";
 import { hashPassword } from "../lib/auth";
 import { formatCnpj } from "../lib/cnpj";
 import { normalize } from "../lib/text";
+import { priceLine } from "../lib/pricing";
 import { productSearchText } from "../repos/products";
 
 // Dados de demonstração baseados no protótipo. Rode em banco vazio: `bun run db:seed`.
@@ -33,7 +34,7 @@ await sql.begin(async (tx) => {
   if (reset) {
     await tx.unsafe(`truncate users, business_accounts, producers, categories, products, price_tiers, lots, favorites,
       carts, cart_items, delivery_regions, orders, order_items, order_events, quote_requests, supplier_proposals,
-      proposal_attachments, contact_messages, site_settings restart identity cascade`);
+      proposal_attachments, contact_messages, site_settings, stock_movements restart identity cascade`);
     // Sequências dos códigos (PED-, COT-, EDS-) não pertencem a nenhuma tabela: zerar à parte.
     await tx.unsafe(`alter sequence order_code_seq restart; alter sequence quote_code_seq restart;
       alter sequence proposal_protocol_seq restart`);
@@ -98,15 +99,18 @@ await sql.begin(async (tx) => {
   for (const p of products) {
     const [row] = await tx`
       insert into products (slug, sku, name, description, producer_id, category_id, unit_label, weight_grams,
-        retail_price_cents, box_size, milk_type, detail_tag, cure_days, badge, awarded, stock_units, featured,
-        sales_count, search_text, image_url)
+        retail_price_cents, box_size, milk_type, detail_tag, cure_days, badge, awarded, stock_units, min_stock_units,
+        featured, sales_count, search_text, image_url)
       values (${p.slug}, ${p.sku}, ${p.name}, ${p.description}, ${prod[p.producer]}, ${cat[p.category]}, ${p.unit},
         ${p.grams}, ${p.retail}, ${p.box}, ${p.milk}, ${p.tag ?? null}, ${p.cure ?? null}, ${p.badge ?? null},
-        ${p.awarded ?? false}, ${p.stockBoxes * p.box}, ${p.featured ?? false}, ${p.sales},
+        ${p.awarded ?? false}, ${p.stockBoxes * p.box}, ${p.box * 3}, ${p.featured ?? false}, ${p.sales},
         ${productSearchText({ name: p.name, sku: p.sku, description: p.description, badge: p.badge, detailTag: p.tag })},
         ${`/images/products/${p.slug}.jpg`})
       returning id`;
     productIds[p.sku] = row.id;
+    await tx`
+      insert into stock_movements (product_id, kind, quantity, stock_after, note, created_at)
+      values (${row.id}, 'entrada', ${p.stockBoxes * p.box}, ${p.stockBoxes * p.box}, 'Estoque inicial', now() - interval '10 days')`;
     const [t1, t2, t3] = p.tiers;
     await tx`
       insert into price_tiers (product_id, min_boxes, max_boxes, unit_price_cents) values
@@ -163,8 +167,85 @@ await sql.begin(async (tx) => {
     insert into business_accounts (user_id, trade_name, legal_name, cnpj, price_table, price_table_valid_until, account_manager)
     values (${buyer.id}, 'Empório Vila Nova', 'Empório Vila Nova Ltda.', ${formatCnpj("11222333000181")}, 'B2B Sudeste',
             ${day(30)}, 'Equipe comercial Encantos')`;
+  const [admin] = await tx`select id from users where email = 'admin@encantos.test'`;
+  const [customer] = await tx`select id from users where email = 'cliente@encantos.test'`;
+
+  // ---- Pedidos de demonstração (alimentam o painel de estoque e pedidos) ----
+  const STEPS = [
+    ["pending", "Pedido recebido. Aguardando confirmação do pagamento.", null],
+    ["confirmed", "Pagamento confirmado.", null],
+    ["preparing", "Pedido em separação na câmara fria.", 3.8],
+    ["in_transit", "Saiu na rota refrigerada.", 4.1],
+    ["delivered", "Entregue ao destinatário.", 5.0],
+  ] as const;
+  const ADDRESSES = {
+    cliente: { cep: "37925000", address: { recipient: "Cliente Demo", street: "Rua das Flores", number: "100", district: "Centro", city: "Piumhi", state: "MG" } },
+    emporio: { cep: "01310100", address: { recipient: "Empório Vila Nova", street: "Av. Paulista", number: "1000", district: "Bela Vista", city: "São Paulo", state: "SP" } },
+  };
+
+  async function seedOrder(o: { who: "cliente" | "emporio"; status: (typeof STEPS)[number][0]; hoursAgo: number; items: { sku: string; mode: "unit" | "box"; quantity: number }[] }) {
+    const userId = o.who === "cliente" ? customer.id : buyer.id;
+    const { cep, address } = ADDRESSES[o.who];
+    const [region] = await tx`select id, fee_cents from delivery_regions where ${Number(cep)} between cep_start and cep_end limit 1`;
+    const lines = [];
+    for (const it of o.items) {
+      const [p] = await tx`
+        select p.id, p.name, p.retail_price_cents, p.box_size,
+          (select json_agg(json_build_object('minBoxes', t.min_boxes, 'maxBoxes', t.max_boxes, 'unitPriceCents', t.unit_price_cents))
+             from price_tiers t where t.product_id = p.id) as tiers
+        from products p where p.sku = ${it.sku}`;
+      const tiers = typeof p.tiers === "string" ? JSON.parse(p.tiers) : p.tiers;
+      lines.push({ ...priceLine({ mode: it.mode, quantity: it.quantity, retailPriceCents: p.retail_price_cents, boxSize: p.box_size, tiers }), productId: p.id, name: p.name });
+    }
+    const subtotal = lines.reduce((a, l) => a + l.totalCents, 0);
+    const createdAt = new Date(Date.now() - o.hoursAgo * 3_600_000).toISOString();
+    const stepIndex = STEPS.findIndex((st) => st[0] === o.status);
+    const shipped = stepIndex >= 3;
+    const [order] = await tx`
+      insert into orders (user_id, channel, status, subtotal_cents, shipping_cents, total_cents, cep, address,
+                          delivery_region_id, scheduled_delivery, created_at, updated_at, shipped_at)
+      values (${userId}, ${lines.some((l) => l.mode === "box") ? "wholesale" : "retail"}, ${o.status}, ${subtotal},
+              ${region.fee_cents}, ${subtotal + region.fee_cents}, ${cep}, ${JSON.stringify(address)}::jsonb, ${region.id},
+              ${day(shipped ? -Math.floor(o.hoursAgo / 24) + 1 : 2)}, ${createdAt}, ${createdAt},
+              ${shipped ? new Date(Date.now() - (o.hoursAgo - 12) * 3_600_000).toISOString() : null})
+      returning id, code`;
+    for (const l of lines) {
+      await tx`
+        insert into order_items (order_id, product_id, lot_id, product_name, mode, quantity, units, unit_price_cents, total_cents)
+        values (${order.id}, ${l.productId}, (select id from lots where product_id = ${l.productId} order by produced_on desc limit 1),
+                ${l.name}, ${l.mode}, ${l.quantity}, ${l.units}, ${l.unitPriceCents}, ${l.totalCents})`;
+      await tx`update products set sales_count = sales_count + ${l.units} where id = ${l.productId}`;
+      if (shipped) {
+        const [after] = await tx`update products set stock_units = stock_units - ${l.units} where id = ${l.productId} returning stock_units`;
+        await tx`
+          insert into stock_movements (product_id, kind, quantity, stock_after, note, order_id, user_id, created_at)
+          values (${l.productId}, 'expedicao', ${-l.units}, ${after.stock_units}, ${`Pedido ${order.code}`}, ${order.id}, ${admin.id},
+                  ${new Date(Date.now() - (o.hoursAgo - 12) * 3_600_000).toISOString()})`;
+      }
+    }
+    for (let i = 0; i <= stepIndex; i++) {
+      const [status, message, temp] = STEPS[i]!;
+      await tx`
+        insert into order_events (order_id, status, message, temperature_c, created_at)
+        values (${order.id}, ${status}, ${message}, ${temp}, ${new Date(Date.now() - (o.hoursAgo - i * 6) * 3_600_000).toISOString()})`;
+    }
+  }
+
+  await seedOrder({ who: "cliente", status: "delivered", hoursAgo: 150, items: [{ sku: "CAN-MC600", mode: "unit", quantity: 2 }] });
+  await seedOrder({ who: "emporio", status: "in_transit", hoursAgo: 30, items: [{ sku: "MAN-C200", mode: "box", quantity: 6 }] });
+  await seedOrder({ who: "emporio", status: "preparing", hoursAgo: 52, items: [{ sku: "TUL-180", mode: "box", quantity: 3 }] });
+
+  // Perda registrada no Tulha depois que os primeiros pedidos entraram: o físico não cobre mais tudo.
+  const [tulha] = await tx`update products set stock_units = stock_units - 4 where sku = 'TUL-180' returning id, stock_units`;
+  await tx`
+    insert into stock_movements (product_id, kind, quantity, stock_after, note, user_id, created_at)
+    values (${tulha.id}, 'perda', -4, ${tulha.stock_units}, 'Peças com trinca na casca', ${admin.id}, now() - interval '40 hours')`;
+
+  await seedOrder({ who: "emporio", status: "confirmed", hoursAgo: 26, items: [{ sku: "TUL-180", mode: "box", quantity: 6 }, { sku: "AZU-M480", mode: "box", quantity: 2 }] });
+  await seedOrder({ who: "emporio", status: "pending", hoursAgo: 8, items: [{ sku: "CAN-RC1K", mode: "box", quantity: 16 }] });
+  await seedOrder({ who: "cliente", status: "pending", hoursAgo: 3, items: [{ sku: "TUL-180", mode: "unit", quantity: 1 }, { sku: "DDL-C450", mode: "unit", quantity: 2 }] });
 });
 
-console.log("Seed concluído: 4 categorias, 5 produtores, 12 produtos, 5 regiões, 3 usuários de demonstração.");
+console.log("Seed concluído: 4 categorias, 5 produtores, 12 produtos, 5 regiões, 3 usuários e 6 pedidos de demonstração.");
 console.log("Logins: admin@encantos.test, cliente@encantos.test, compras@encantos.test (senha = SEED_PASSWORD).");
 await closeDb();

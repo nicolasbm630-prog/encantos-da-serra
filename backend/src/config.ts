@@ -11,6 +11,8 @@ const schema = z.object({
   CORS_ORIGINS: z.string().default("http://localhost:5173,http://localhost:3000"),
   UPLOAD_DIR: z.string().default("./uploads"),
   TZ_BUSINESS: z.string().default("America/Sao_Paulo"),
+  // Painel admin sem login (temporário, só para desenvolvimento). Use "false" para exigir conta admin.
+  ADMIN_AUTH_DISABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
 });
 
 export type Config = z.infer<typeof schema>;

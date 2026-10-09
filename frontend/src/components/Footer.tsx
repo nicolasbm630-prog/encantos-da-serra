@@ -38,7 +38,7 @@ export function Footer() {
         </div>
         <div className="footer-copy">
           <span>© {new Date().getFullYear()} Encantos da Serra. Feito em Minas, com respeito à origem.</span>
-          <span>Projeto de estudos · dados fictícios</span>
+          <span>Projeto de estudos · dados fictícios · <Link to="/admin">Painel de gestão</Link></span>
         </div>
       </div>
     </footer>

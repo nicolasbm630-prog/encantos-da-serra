@@ -113,6 +113,9 @@ export function Header() {
           <div className="header-actions">
             {user ? (
               <>
+                {user.role === "admin" && (
+                  <Link to="/admin" className="header-link" aria-label="Painel de gestão"><Icon name="layers" /><span className="label">Painel</span></Link>
+                )}
                 <Link to="/pedidos" className="header-link" aria-label="Minha conta e pedidos"><Icon name="user" /><span className="label">Minha conta</span></Link>
                 <button className="header-link" onClick={() => { logout(); navigate("/"); }} aria-label="Sair"><Icon name="logout" /></button>
               </>

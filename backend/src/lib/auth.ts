@@ -1,7 +1,8 @@
 import { createMiddleware } from "hono/factory";
 import { sign, verify } from "hono/jwt";
 import { config } from "../config";
-import { forbidden, unauthorized } from "./errors";
+import { db } from "../db";
+import { AppError, forbidden, unauthorized } from "./errors";
 import type { AppEnv, AuthUser } from "./types";
 
 export const userRoles = ["customer", "business", "producer", "admin"] as const;
@@ -63,3 +64,26 @@ export function currentUser(c: { get(key: "user"): AuthUser | undefined }): Auth
   if (!user) throw unauthorized();
   return user;
 }
+
+// Acesso ao painel: conta admin, ou livre quando ADMIN_AUTH_DISABLED=true.
+// No modo livre as ações ficam registradas no primeiro usuário admin do banco.
+let openModeActor: AuthUser | undefined;
+
+export const adminAccess = createMiddleware<AppEnv>(async (c, next) => {
+  const user = await readUser(c.req.header("Authorization"));
+  if (user?.role === "admin") {
+    c.set("user", user);
+    return next();
+  }
+  if (!config().ADMIN_AUTH_DISABLED) {
+    if (!user) throw unauthorized();
+    throw forbidden();
+  }
+  if (!openModeActor) {
+    const [admin] = await db()`select id, name, email, role from users where role = 'admin' order by id limit 1`;
+    if (!admin) throw new AppError(503, "no_admin", "Crie um usuário admin (bun run db:seed) para registrar as ações do painel");
+    openModeActor = admin as AuthUser;
+  }
+  c.set("user", openModeActor);
+  await next();
+});
