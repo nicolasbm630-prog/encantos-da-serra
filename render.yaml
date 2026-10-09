@@ -1,0 +1,27 @@
+# Blueprint do Render: um Web Service só, que entrega o site compilado e a API.
+# O banco continua no Supabase; DATABASE_URL é pedida no painel ao criar o Blueprint.
+services:
+  - type: web
+    name: encantos-da-serra
+    runtime: node # runtime JavaScript do Render; o Bun entra pelo arquivo .bun-version
+    plan: free
+    region: virginia # mais perto do Supabase (ca-central-1)
+    buildCommand: >-
+      cd frontend && bun install --frozen-lockfile && bun run build &&
+      cd ../backend && bun install --frozen-lockfile --production
+    startCommand: cd backend && bun src/index.ts
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: STATIC_DIR
+        value: ../frontend/dist
+      # Disco do plano gratuito é apagado a cada reinício: anexos de proposta não persistem.
+      - key: UPLOAD_DIR
+        value: /tmp/uploads
+      - key: ADMIN_AUTH_DISABLED
+        value: "false"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false

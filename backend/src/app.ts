@@ -19,6 +19,7 @@ import { orderRoutes } from "./routes/orders";
 import { proposalRoutes } from "./routes/proposals";
 import { wholesaleRoutes } from "./routes/wholesale";
 import { docsPage } from "./docs";
+import { serveSite } from "./lib/static";
 
 export function createApp() {
   const api = new Hono<AppEnv>()
@@ -55,7 +56,15 @@ export function createApp() {
   });
 
   app.route("/api", api);
-  app.get("/", (c) => c.html(docsPage(app)));
+
+  const staticDir = config().STATIC_DIR;
+  if (staticDir) {
+    // Produção: um serviço só entrega o site e a API; a documentação vai para /docs.
+    app.get("/docs", (c) => c.html(docsPage(app)));
+    app.get("*", serveSite(staticDir));
+  } else {
+    app.get("/", (c) => c.html(docsPage(app)));
+  }
 
   app.notFound((c) => c.json({ error: { code: "not_found", message: "Rota não encontrada" } }, 404));
 

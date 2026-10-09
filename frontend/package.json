@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot server.ts",
-    "build": "bun build ./index.html --outdir dist --minify && cp -R public/. dist/",
+    "build": "rm -rf dist && bun build ./index.html --outdir dist --production --public-path=/ && cp -R public/. dist/",
     "start": "NODE_ENV=production bun server.ts",
     "typecheck": "tsc --noEmit -p ."
   },

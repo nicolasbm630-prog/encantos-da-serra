@@ -10,6 +10,8 @@ const schema = z.object({
   PORT: z.coerce.number().int().default(3333),
   CORS_ORIGINS: z.string().default("http://localhost:5173,http://localhost:3000"),
   UPLOAD_DIR: z.string().default("./uploads"),
+  // Em produção, pasta do site compilado (frontend/dist). A API passa a entregar o site também.
+  STATIC_DIR: z.string().optional(),
   TZ_BUSINESS: z.string().default("America/Sao_Paulo"),
   // Painel admin sem login (temporário, só para desenvolvimento). Use "false" para exigir conta admin.
   ADMIN_AUTH_DISABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),

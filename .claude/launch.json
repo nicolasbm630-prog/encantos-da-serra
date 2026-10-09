@@ -12,6 +12,12 @@
       "runtimeExecutable": "/Users/nicolasbarbosa/.bun/bin/bun",
       "runtimeArgs": ["--cwd", "/Users/nicolasbarbosa/encantos-da-serra/frontend", "--hot", "server.ts"],
       "port": 5173
+    },
+    {
+      "name": "producao-local",
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": ["NODE_ENV=production", "PORT=4599", "STATIC_DIR=../frontend/dist", "/Users/nicolasbarbosa/.bun/bin/bun", "--cwd", "/Users/nicolasbarbosa/encantos-da-serra/backend", "src/index.ts"],
+      "port": 4599
     }
   ]
 }
