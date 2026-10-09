@@ -302,7 +302,7 @@ button.header-link { border: 0; background: none; color: inherit; cursor: pointe
 .audience p { margin: 0 0 8px; color: var(--ink-2); max-width: 440px; }
 .audience .link { margin-top: auto; display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 6px 0; }
 .audience.dark { background: var(--green-900); border-color: var(--green-900); color: #eef0e8; }
-.audience.dark h3 { color: #fbf8f2; }
+.audience.dark h2, .audience.dark h3 { color: #fbf8f2; }
 .audience.dark p { color: #d5dacb; }
 .audience.dark .kicker { color: #d5dacb; }
 .audience .kicker { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; color: var(--muted); }
