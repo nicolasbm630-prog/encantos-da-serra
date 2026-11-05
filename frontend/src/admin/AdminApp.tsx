@@ -6,11 +6,13 @@ import { InventoryPage } from "./InventoryPage";
 import { OrdersPage } from "./OrdersPage";
 import { ProductForm } from "./ProductForm";
 import { ProductsPage } from "./ProductsPage";
+import { RoutesPage } from "./RoutesPage";
 
 const TABS = [
   { to: "/admin", label: "Pedidos", icon: "receipt" as const },
   { to: "/admin/estoque", label: "Estoque", icon: "boxes" as const },
   { to: "/admin/produtos", label: "Produtos", icon: "layers" as const },
+  { to: "/admin/rotas", label: "Rotas", icon: "truck" as const },
 ];
 
 function Section({ pathname }: { pathname: string }) {
@@ -19,6 +21,7 @@ function Section({ pathname }: { pathname: string }) {
   if (edit) return <ProductForm key={edit.id} id={Number(edit.id)} />;
   if (pathname.startsWith("/admin/produtos")) return <ProductsPage />;
   if (pathname.startsWith("/admin/estoque")) return <InventoryPage />;
+  if (pathname.startsWith("/admin/rotas")) return <RoutesPage />;
   return <OrdersPage />;
 }
 
@@ -31,7 +34,7 @@ export function AdminApp() {
 
   useEffect(() => {
     if (pathname.startsWith("/admin/produtos/")) return; // o formulário define o próprio título
-    const section = pathname.startsWith("/admin/estoque") ? "Estoque" : pathname.startsWith("/admin/produtos") ? "Produtos" : "Pedidos";
+    const section = pathname.startsWith("/admin/estoque") ? "Estoque" : pathname.startsWith("/admin/produtos") ? "Produtos" : pathname.startsWith("/admin/rotas") ? "Rotas" : "Pedidos";
     document.title = `${section} · Painel Encantos`;
   }, [pathname]);
 
@@ -63,8 +66,8 @@ export function AdminApp() {
             {TABS.map((t) => {
               const active = t.to === "/admin" ? pathname === "/admin" : pathname.startsWith(t.to);
               return (
-                <Link key={t.to} to={t.to} className="adm-tab" aria-current={active ? "page" : undefined}>
-                  <Icon name={t.icon} className="icon-sm" />{t.label}
+                <Link key={t.to} to={t.to} className="adm-tab" aria-current={active ? "page" : undefined} title={t.label}>
+                  <Icon name={t.icon} className="icon-sm" /><span className="adm-tab-label">{t.label}</span>
                 </Link>
               );
             })}

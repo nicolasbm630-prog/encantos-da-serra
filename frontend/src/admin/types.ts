@@ -130,3 +130,11 @@ export const MILK_OPTIONS = [
   { value: "misto", label: "Leite misto" },
   { value: "nenhum", label: "Não se aplica" },
 ] as const;
+
+// "34,90" / "34.90" / "1.234,50" → centavos. Vazio ou inválido → NaN.
+export const toCents = (v: string) => {
+  const clean = v.replace(/[^\d,.]/g, "");
+  const normalized = clean.includes(",") ? clean.replace(/\./g, "").replace(",", ".") : clean;
+  return normalized ? Math.round(Number(normalized) * 100) : NaN;
+};
+export const fromCents = (c: number) => (c / 100).toFixed(2).replace(".", ",");

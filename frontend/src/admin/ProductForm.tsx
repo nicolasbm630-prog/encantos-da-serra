@@ -4,7 +4,7 @@ import { brl } from "../format";
 import { Icon } from "../icons";
 import { Link, navigate } from "../router";
 import { useApi, useStore } from "../store";
-import { MILK_OPTIONS, type AdminProduct, type ProductOptions } from "./types";
+import { fromCents, MILK_OPTIONS, toCents, type AdminProduct, type ProductOptions } from "./types";
 
 type TierRow = { min: string; max: string; price: string };
 
@@ -24,13 +24,6 @@ const EMPTY: FormState = {
   imageUrl: "", active: true, featured: false, stockUnits: "",
 };
 
-// "34,90" / "34.90" / "1.234,50" → centavos. Vazio ou inválido → NaN.
-const toCents = (v: string) => {
-  const clean = v.replace(/[^\d,.]/g, "");
-  const normalized = clean.includes(",") ? clean.replace(/\./g, "").replace(",", ".") : clean;
-  return normalized ? Math.round(Number(normalized) * 100) : NaN;
-};
-const fromCents = (c: number) => (c / 100).toFixed(2).replace(".", ",");
 const int = (v: string) => (v.trim() === "" ? NaN : Number(v));
 const digits = (v: string) => v.replace(/\D/g, "");
 

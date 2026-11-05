@@ -11,6 +11,7 @@ import { detectFileType, uploadPath } from "../lib/uploads";
 import { isUniqueViolation, validate } from "../lib/validate";
 import { findProduct, PRODUCT_COLUMNS, PRODUCT_FROM, productSearchText, toProductDto, type ProductRow } from "../repos/products";
 import { getOrder } from "../repos/checkout";
+import { deleteRegion, listRegions, saveRegion } from "../repos/regions";
 import { applyMovement, inventoryOverview, ORDER_FILTERS, ordersBoard, productBatches, productMovements, transitionOrder } from "../repos/inventory";
 
 const tierSchema = z.object({
@@ -70,6 +71,21 @@ function detectImage(bytes: Uint8Array) {
   if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return { mime: "image/webp", ext: "webp" };
   return undefined;
 }
+
+// CEP em texto ("30000-000") vira número; dias da semana 0 (domingo) a 6 (sábado).
+const cepNumber = z.string().transform((v) => v.replace(/\D/g, "")).refine((v) => v.length === 8, "CEP precisa de 8 dígitos").transform(Number);
+const regionSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  cepStart: cepNumber,
+  cepEnd: cepNumber,
+  routeWeekdays: z.array(z.number().int().min(0).max(6)).min(1, "Escolha pelo menos um dia de rota"),
+  cutoffDays: z.number().int().min(0).max(14),
+  feeCents: z.number().int().min(0).max(100_000),
+  freeShippingOverCents: z.number().int().positive().nullable(),
+  minTempC: z.number().min(-10).max(30).default(2),
+  maxTempC: z.number().min(-10).max(30).default(8),
+}).refine((r) => r.cepEnd >= r.cepStart, { message: "O CEP final precisa ser maior ou igual ao inicial", path: ["cepEnd"] })
+  .refine((r) => r.maxTempC > r.minTempC, { message: "Temperatura máxima precisa ser maior que a mínima", path: ["maxTempC"] });
 
 const movementSchema = z.object({
   kind: z.enum(["entrada", "saida", "perda", "contagem"]),
@@ -281,6 +297,28 @@ export const adminRoutes = new Hono<AppEnv>()
       where id = ${Number(c.req.param("productId"))} returning id`;
     if (!row) throw notFound("Produto");
     return c.json(await inventoryOverview());
+  })
+
+  // Regiões e dias de entrega
+  .get("/regions", async (c) => c.json({ regions: await listRegions() }))
+
+  .post("/regions", validate("json", regionSchema), async (c) => {
+    const saved = await saveRegion(c.req.valid("json"));
+    return c.json({ ...saved, regions: await listRegions() }, 201);
+  })
+
+  .put("/regions/:id", validate("json", regionSchema), async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) throw notFound("Região");
+    const saved = await saveRegion(c.req.valid("json"), id);
+    return c.json({ ...saved, regions: await listRegions() });
+  })
+
+  .delete("/regions/:id", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) throw notFound("Região");
+    await deleteRegion(id);
+    return c.json({ regions: await listRegions() });
   })
 
   // Cotações B2B
