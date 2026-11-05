@@ -97,11 +97,31 @@ export type Order = {
   shippingCents: number;
   totalCents: number;
   cep: string;
+  address?: Address;
   scheduledDelivery: string | null;
   deliveryRegion: string | null;
   createdAt: string;
   items: { productName: string; mode: string; quantity: number; units: number; unitPriceCents: number; totalCents: number; lot: { code: string; producedOn: string; cureDays: number | null } | null }[];
   timeline: { status: string; message: string; temperatureC: string | number | null; at: string }[];
+};
+
+export type Address = { recipient: string; street: string; number: string; complement?: string; district: string; city: string; state: string };
+
+// Opções para alterar a entrega de um pedido aberto.
+export type DeliveryOptions = {
+  canChange: boolean;
+  deadline: string | null;
+  missedRoute: boolean;
+  reason: string | null;
+  current: { cep: string; scheduledDelivery: string | null };
+  quote: null | {
+    region: { id: number; name: string };
+    cep: string;
+    dates: { date: string; weekday: string }[];
+    shippingCents: number;
+    totalCents: number;
+    differenceCents: number;
+  };
 };
 
 export type DeliveryInfo = {

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
-import { dateTime } from "../format";
+import { dateTime, longDate } from "../format";
 import { Icon } from "../icons";
 import { Link } from "../router";
 import { useApi, useStore } from "../store";
 import { Dialog } from "./Dialog";
-import { boxesNeeded, MOVEMENT_LABEL, STOCK_LABEL, timeAgo, unitsBoxes, type Inventory, type InventoryProduct, type Movement } from "./types";
+import { boxesNeeded, daysUntil, MOVEMENT_LABEL, STOCK_LABEL, timeAgo, unitsBoxes, type Batch, type Inventory, type InventoryProduct, type Movement } from "./types";
 
 const KINDS = [
   { id: "entrada", label: "Entrada", help: "Chegou mercadoria (coleta, compra)." },
@@ -16,16 +16,38 @@ const KINDS = [
 
 type Kind = (typeof KINDS)[number]["id"];
 
+const needsAttention = (p: InventoryProduct) => p.status !== "ok" || !!p.expiry;
+
+// "vence em 6 dias" / "vence hoje" / "venceu há 3 dias"
+function expiryText(iso: string) {
+  const d = daysUntil(iso);
+  if (d > 1) return `vence em ${d} dias`;
+  if (d === 1) return "vence amanhã";
+  if (d === 0) return "vence hoje";
+  return `venceu há ${-d} ${d === -1 ? "dia" : "dias"}`;
+}
+
+function ExpiryPill({ p }: { p: InventoryProduct }) {
+  if (!p.expiry || !p.nextExpiry) return null;
+  return (
+    <span className="adm-expiry" data-expiry={p.expiry}>
+      {p.expiry === "vencido" ? `${p.expiredUnits} un vencidas` : `${p.expiringUnits} un ${expiryText(p.nextExpiry)}`}
+    </span>
+  );
+}
+
 function StockBar({ p }: { p: InventoryProduct }) {
   // Barra = físico; a parte escura é o reservado. Se o reservado passa do físico, mostra o excesso.
   const total = Math.max(p.onHand, p.reserved, 1);
   const reservedPct = Math.min(100, (Math.min(p.reserved, p.onHand) / total) * 100);
-  const freePct = Math.max(0, ((p.onHand - p.reserved) / total) * 100);
+  const expiredPct = Math.min(Math.max(0, p.onHand - p.reserved), p.expiredUnits) / total * 100;
+  const freePct = Math.max(0, ((p.onHand - p.reserved - p.expiredUnits) / total) * 100);
   const shortPct = p.reserved > p.onHand ? ((p.reserved - p.onHand) / total) * 100 : 0;
   const minPct = Math.min(100, (p.minStockUnits / total) * 100);
   return (
-    <div className="adm-stockbar" title={`Físico ${p.onHand} · reservado ${p.reserved} · disponível ${p.available}`}>
+    <div className="adm-stockbar" title={`Físico ${p.onHand} · reservado ${p.reserved} · vencido ${p.expiredUnits} · disponível ${p.available}`}>
       <span className="reserved" style={{ width: `${reservedPct}%` }} />
+      {expiredPct > 0 && <span className="expired" style={{ width: `${expiredPct}%` }} />}
       <span className="free" style={{ width: `${freePct}%` }} />
       {shortPct > 0 && <span className="short" style={{ width: `${shortPct}%` }} />}
       {p.minStockUnits > 0 && <i className="min" style={{ left: `${Math.min(99, (Math.min(p.reserved, p.onHand) / total) * 100 + minPct)}%` }} />}
@@ -42,7 +64,7 @@ export function InventoryPage() {
   const products = useMemo(() => {
     const term = q.trim().toLowerCase();
     return (data?.products ?? []).filter((p) =>
-      (view === "all" || p.status !== "ok") &&
+      (view === "all" || needsAttention(p)) &&
       (!term || p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term) || p.producerName.toLowerCase().includes(term)));
   }, [data, view, q]);
 
@@ -52,18 +74,21 @@ export function InventoryPage() {
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const s = data?.summary;
-  const issues = (data?.products ?? []).filter((p) => p.status !== "ok").length;
+  const issues = (data?.products ?? []).filter(needsAttention).length;
 
   return (
     <>
       <div className="adm-head">
         <div>
           <h1>Estoque</h1>
-          <p><b>Físico</b> é o que está na câmara fria. <b>Reservado</b> são pedidos abertos ainda não expedidos. <b>Disponível</b> é o que a loja pode vender.</p>
+          <p><b>Físico</b> é o que está na câmara fria. <b>Reservado</b> são pedidos abertos ainda não expedidos. <b>Disponível</b> é o que a loja pode vender: físico menos vencidas e reservas.</p>
         </div>
-        <button className="btn btn-outline btn-sm" onClick={reload} disabled={loading}>
-          <Icon name={loading ? "loader" : "route"} className={loading ? "icon-sm spin" : "icon-sm"} />Atualizar
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-outline btn-sm" onClick={reload} disabled={loading}>
+            <Icon name={loading ? "loader" : "route"} className={loading ? "icon-sm spin" : "icon-sm"} />Atualizar
+          </button>
+          <Link to="/admin/produtos/novo" className="btn btn-primary btn-sm"><Icon name="plus" className="icon-sm" />Novo produto</Link>
+        </div>
       </div>
 
       <div className="adm-kpis">
@@ -78,6 +103,12 @@ export function InventoryPage() {
           <span className="adm-kpi-label">Abaixo do mínimo</span>
           <b>{s?.belowMinimum ?? "–"}</b>
           <small>disponível menor que o mínimo</small>
+        </div>
+        <div className="adm-kpi" data-tone={s?.expiredUnits ? "alert" : s?.expiring ? "warn" : undefined}>
+          <span className="adm-kpi-icon"><Icon name="calendar" className="icon-sm" /></span>
+          <span className="adm-kpi-label">Validade</span>
+          <b>{s?.expiring ?? "–"}</b>
+          <small>{s?.expiredUnits ? `produtos com lote vencido ou vencendo · ${s.expiredUnits.toLocaleString("pt-BR")} un vencidas` : "produtos vencendo em até 10 dias"}</small>
         </div>
         <div className="adm-kpi">
           <span className="adm-kpi-icon"><Icon name="receipt" className="icon-sm" /></span>
@@ -113,7 +144,7 @@ export function InventoryPage() {
                 <th className="num">Físico</th>
                 <th className="num">Reservado</th>
                 <th className="num">Disponível</th>
-                <th className="bar-col">Ocupação <span className="adm-legend"><i className="reserved" />reservado <i className="free" />livre <i className="short" />falta</span></th>
+                <th className="bar-col">Ocupação <span className="adm-legend"><i className="reserved" />reservado <i className="free" />livre <i className="expired" />vencido <i className="short" />falta</span></th>
                 <th>Situação</th>
                 <th className="actions"><span className="sr-only">Ações</span></th>
               </tr>
@@ -122,7 +153,7 @@ export function InventoryPage() {
               {loading && !data && <tr><td colSpan={7}><div className="skeleton" style={{ height: 200 }} /></td></tr>}
               {data && products.length === 0 && <tr><td colSpan={7} className="adm-empty">Nada por aqui. {view === "issues" ? "Todos os produtos estão em dia." : ""}</td></tr>}
               {products.map((p) => (
-                <tr key={p.id} className="adm-row" data-stock={p.status} onClick={() => setSelected(p)}>
+                <tr key={p.id} className="adm-row" data-stock={p.status} data-expiry={p.expiry ?? undefined} onClick={() => setSelected(p)}>
                   <td>
                     <span className="adm-prod">
                       {p.imageUrl ? <img src={p.imageUrl} alt="" /> : <span />}
@@ -137,11 +168,15 @@ export function InventoryPage() {
                   <td className="num"><b className={p.available < 0 ? "adm-neg" : ""}>{p.available.toLocaleString("pt-BR")}</b><small className="adm-muted">mín. {p.minStockUnits}</small></td>
                   <td className="bar-col"><StockBar p={p} /></td>
                   <td>
-                    <span className="adm-stock" data-stock={p.status}>{STOCK_LABEL[p.status]}</span>
+                    {(p.status !== "ok" || !p.expiry) && <span className="adm-stock" data-stock={p.status}>{STOCK_LABEL[p.status]}</span>}
                     {p.shortUnits > 0 && <small className="adm-warn">faltam {p.shortUnits} un</small>}
+                    <ExpiryPill p={p} />
                   </td>
                   <td className="actions" onClick={(e) => e.stopPropagation()}>
-                    <button className="btn btn-sm btn-outline" onClick={() => setSelected(p)}>Movimentar</button>
+                    <span className="adm-actions">
+                      <button className="btn btn-sm btn-outline" onClick={() => setSelected(p)}>Movimentar</button>
+                      <Link to={`/admin/produtos/${p.id}`} className="btn btn-sm btn-ghost-line" aria-label={`Editar preço e dados de ${p.name}`}>Editar</Link>
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -165,7 +200,7 @@ function ProductPanel({ product: p, onChanged }: { product: InventoryProduct; on
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [minEdit, setMinEdit] = useState(String(p.minStockUnits));
-  const movements = useApi<{ movements: Movement[] }>(`/admin/inventory/${p.id}/movements`);
+  const movements = useApi<{ movements: Movement[]; batches: Batch[] }>(`/admin/inventory/${p.id}/movements`);
 
   const n = Number(qty) || 0;
   const units = unit === "box" ? n * p.boxSize : n;
@@ -213,6 +248,7 @@ function ProductPanel({ product: p, onChanged }: { product: InventoryProduct; on
           </span>
         </div>
       </div>
+      <Link to={`/admin/produtos/${p.id}`} className="adm-edit-link"><Icon name="dollar" className="icon-sm" />Editar preço, faixas do atacado e dados do produto</Link>
       {p.shortUnits > 0 && (
         <div className="adm-alert">
           <Icon name="box" className="icon-sm" />
@@ -248,16 +284,40 @@ function ProductPanel({ product: p, onChanged }: { product: InventoryProduct; on
           </label>
           <div className="adm-preview" data-bad={after < 0}>
             Físico: <b>{p.onHand}</b> → <b>{qty === "" ? "—" : after}</b> un
-            {qty !== "" && after >= 0 && <span> · disponível {after - p.reserved}{after - p.reserved < 0 ? " (ainda falta)" : ""}</span>}
+            {qty !== "" && after >= 0 && kind === "entrada" && <span> · disponível {p.available + units}{p.available + units < 0 ? " (ainda falta)" : ""}</span>}
             {after < 0 && <span> · não pode ficar negativo</span>}
           </div>
+          {kind === "entrada" && p.shelfLifeDays && (
+            <small className="adm-muted">Este lote vence em {longDate(new Date(Date.now() + p.shelfLifeDays * 86_400_000).toISOString())} ({p.shelfLifeDays} dias).</small>
+          )}
           <button className="btn btn-primary btn-sm" disabled={invalid || saving}>
             {saving && <Icon name="loader" className="icon-sm spin" />}Registrar {MOVEMENT_LABEL[kind]?.toLowerCase()}
           </button>
         </form>
 
         <div>
-          <h3>Histórico</h3>
+          <h3 style={{ marginTop: 0 }}>Lotes e validade</h3>
+          {p.shelfLifeDays
+            ? <small className="adm-muted">Validade de {p.shelfLifeDays} dias a partir da entrada. Saídas usam primeiro o lote que vence antes.</small>
+            : <small className="adm-muted">Sem validade definida. <Link to={`/admin/produtos/${p.id}`} style={{ textDecoration: "underline" }}>Definir em Editar produto</Link>.</small>}
+          {movements.data && (
+            <ul className="adm-batches">
+              {movements.data.batches.map((b) => {
+                const d = b.expiresAt ? daysUntil(b.expiresAt) : null;
+                const tone = d === null ? undefined : d <= 0 ? "vencido" : d <= 10 ? "vencendo" : undefined;
+                return (
+                  <li key={b.id} data-expiry={tone}>
+                    <span><b>{b.quantity.toLocaleString("pt-BR")} un</b><small>entrada {longDate(b.receivedAt)}</small></span>
+                    <span className="adm-batch-exp">{b.expiresAt ? <>{longDate(b.expiresAt)}<small>{expiryText(b.expiresAt)}</small></> : <small>sem validade</small>}</span>
+                  </li>
+                );
+              })}
+              {movements.data.batches.length === 0 && <li className="adm-muted">Sem saldo em estoque.</li>}
+            </ul>
+          )}
+          {p.expiredUnits > 0 && <small className="adm-warn" style={{ marginTop: 8 }}>Registre uma perda para tirar as unidades vencidas do estoque.</small>}
+
+          <h3 style={{ marginTop: 20 }}>Histórico</h3>
           {movements.loading && !movements.data ? <div className="skeleton" style={{ height: 160 }} /> : (
             <ol className="adm-history">
               {movements.data?.movements.map((m) => (

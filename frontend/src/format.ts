@@ -32,6 +32,7 @@ export const STATUS_LABEL: Record<string, string> = {
   in_transit: "Em rota",
   delivered: "Entregue",
   cancelled: "Cancelado",
+  delivery_changed: "Entrega alterada",
   open: "Aguardando resposta",
   answered: "Respondida",
   accepted: "Aceita",

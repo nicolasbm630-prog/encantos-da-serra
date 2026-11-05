@@ -133,7 +133,7 @@ export async function createOrder(input: {
       insert into orders (user_id, channel, subtotal_cents, discount_cents, shipping_cents, total_cents,
                           cep, address, delivery_region_id, scheduled_delivery, notes)
       values (${user.id}, ${channel}, ${priced.totals.subtotalCents}, 0, ${shipping},
-              ${priced.totals.subtotalCents + shipping}, ${cep}, ${JSON.stringify(address)}::jsonb, ${region.id},
+              ${priced.totals.subtotalCents + shipping}, ${cep}, ${JSON.stringify(address)}::text::jsonb, ${region.id},
               ${delivery.nextDelivery?.date ?? null}, ${notes ?? null})
       returning id`;
 

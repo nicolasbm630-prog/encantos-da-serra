@@ -34,7 +34,8 @@ await sql.begin(async (tx) => {
   if (reset) {
     await tx.unsafe(`truncate users, business_accounts, producers, categories, products, price_tiers, lots, favorites,
       carts, cart_items, delivery_regions, orders, order_items, order_events, quote_requests, supplier_proposals,
-      proposal_attachments, contact_messages, site_settings, stock_movements restart identity cascade`);
+      proposal_attachments, contact_messages, site_settings, stock_movements, stock_batches, stock_batch_moves
+      restart identity cascade`);
     // Sequências dos códigos (PED-, COT-, EDS-) não pertencem a nenhuma tabela: zerar à parte.
     await tx.unsafe(`alter sequence order_code_seq restart; alter sequence quote_code_seq restart;
       alter sequence proposal_protocol_seq restart`);
@@ -81,18 +82,18 @@ await sql.begin(async (tx) => {
     badge?: string; awarded?: boolean; stockBoxes: number; featured?: boolean; sales: number; description: string;
   };
   const products: Seed[] = [
-    { sku: "CAN-MC600", slug: "queijo-canastra-meia-cura", name: "Queijo Canastra Meia Cura", producer: "fazenda-capao-grande", category: "queijos-maturados", unit: "peça", grams: 600, retail: 5890, box: 12, tiers: [4980, 4690, 4320], milk: "vaca", tag: "Leite cru", cure: 22, badge: "Ouro • Queijo Brasil", awarded: true, stockBoxes: 184, featured: true, sales: 940, description: "Casca fina e amarelada, massa macia e levemente ácida. 22 dias de cura." },
-    { sku: "MAN-C200", slug: "manteiga-de-cultivo", name: "Manteiga de Cultivo", producer: "sitio-campo-alto", category: "manteigas-derivados", unit: "pote", grams: 200, retail: 2950, box: 24, tiers: [2390, 2180, 1990], milk: "vaca", tag: "Leite A2A2", badge: "100% Artesanal", stockBoxes: 96, featured: true, sales: 810, description: "Nata maturada por 24 h, batida em pequenos lotes. Sal na medida." },
-    { sku: "AZU-M480", slug: "queijo-azul-da-mantiqueira", name: "Queijo Azul da Mantiqueira", producer: "laticinio-serra-clara", category: "queijos-maturados", unit: "peça", grams: 480, retail: 7400, box: 8, tiers: [6660, 6290, 5840], milk: "vaca", tag: "Leite de vaca", cure: 60, badge: "Prata • Mondial", awarded: true, stockBoxes: 40, featured: true, sales: 420, description: "Veios azuis bem distribuídos, sabor intenso e final amanteigado." },
-    { sku: "DDL-C450", slug: "doce-de-leite-cremoso", name: "Doce de Leite Cremoso", producer: "casa-dona-zita", category: "doce-de-leite", unit: "vidro", grams: 450, retail: 3490, box: 12, tiers: [2790, 2550, 2280], milk: "vaca", tag: "Receita de tacho", badge: "Produção Local", stockBoxes: 210, featured: true, sales: 1020, description: "Ponto de colher, cozido lentamente no tacho de cobre." },
-    { sku: "MIN-F500", slug: "queijo-minas-frescal", name: "Queijo Minas Frescal", producer: "sitio-campo-alto", category: "queijos-frescos", unit: "peça", grams: 500, retail: 2490, box: 12, tiers: [1990, 1850, 1720], milk: "vaca", tag: "Leite A2A2", stockBoxes: 60, sales: 650, description: "Massa branca, úmida e suave. Consumir em até 10 dias." },
+    { sku: "CAN-MC600", slug: "queijo-canastra-meia-cura", name: "Queijo Canastra Meia Cura", producer: "fazenda-capao-grande", category: "queijos-maturados", unit: "peça", grams: 600, retail: 5290, box: 12, tiers: [4470, 4210, 3880], milk: "vaca", tag: "Leite cru", cure: 22, badge: "Ouro • Queijo Brasil", awarded: true, stockBoxes: 184, featured: true, sales: 940, description: "Casca fina e amarelada, massa macia e levemente ácida. 22 dias de cura." },
+    { sku: "MAN-C200", slug: "manteiga-de-cultivo", name: "Manteiga de Cultivo", producer: "sitio-campo-alto", category: "manteigas-derivados", unit: "pote", grams: 200, retail: 2790, box: 24, tiers: [2260, 2060, 1880], milk: "vaca", tag: "Leite A2A2", badge: "100% Artesanal", stockBoxes: 96, featured: true, sales: 810, description: "Nata maturada por 24 h, batida em pequenos lotes. Sal na medida." },
+    { sku: "AZU-M480", slug: "queijo-azul-da-mantiqueira", name: "Queijo Azul da Mantiqueira", producer: "laticinio-serra-clara", category: "queijos-maturados", unit: "peça", grams: 480, retail: 7190, box: 8, tiers: [6470, 6110, 5670], milk: "vaca", tag: "Leite de vaca", cure: 60, badge: "Prata • Mondial", awarded: true, stockBoxes: 40, featured: true, sales: 420, description: "Veios azuis bem distribuídos, sabor intenso e final amanteigado." },
+    { sku: "DDL-C450", slug: "doce-de-leite-cremoso", name: "Doce de Leite Cremoso", producer: "casa-dona-zita", category: "doce-de-leite", unit: "vidro", grams: 450, retail: 3690, box: 12, tiers: [2950, 2700, 2410], milk: "vaca", tag: "Receita de tacho", badge: "Produção Local", stockBoxes: 210, featured: true, sales: 1020, description: "Ponto de colher, cozido lentamente no tacho de cobre." },
+    { sku: "MIN-F500", slug: "queijo-minas-frescal", name: "Queijo Minas Frescal", producer: "sitio-campo-alto", category: "queijos-frescos", unit: "peça", grams: 500, retail: 2690, box: 12, tiers: [2150, 2000, 1860], milk: "vaca", tag: "Leite A2A2", stockBoxes: 60, sales: 650, description: "Massa branca, úmida e suave. Consumir em até 10 dias." },
     { sku: "RIC-F400", slug: "ricota-fresca", name: "Ricota Fresca", producer: "laticinio-serra-clara", category: "queijos-frescos", unit: "peça", grams: 400, retail: 1690, box: 12, tiers: [1350, 1260, 1170], milk: "vaca", stockBoxes: 45, sales: 300, description: "Leve e aerada, ideal para recheios e cafés da manhã." },
     { sku: "CAB-F250", slug: "queijo-de-cabra-frescal", name: "Queijo de Cabra Frescal", producer: "sitio-boa-vista", category: "queijos-frescos", unit: "peça", grams: 250, retail: 3200, box: 10, tiers: [2650, 2490, 2290], milk: "cabra", tag: "Leite de cabra", badge: "100% Artesanal", stockBoxes: 25, sales: 210, description: "Fresco, cítrico e cremoso. Produção pequena, semanal." },
-    { sku: "CAN-RC1K", slug: "canastra-real-curado", name: "Canastra Real Curado", producer: "fazenda-capao-grande", category: "queijos-maturados", unit: "peça", grams: 1000, retail: 11900, box: 6, tiers: [9990, 9490, 8990], milk: "vaca", tag: "Leite cru", cure: 90, badge: "Super Ouro • Mondial", awarded: true, stockBoxes: 18, sales: 180, description: "90 dias de cura: casca firme, massa cristalina e sabor profundo." },
-    { sku: "TUL-180", slug: "queijo-tulha-180-dias", name: "Queijo Tulha 180 dias", producer: "laticinio-serra-clara", category: "queijos-maturados", unit: "peça", grams: 1200, retail: 14900, box: 4, tiers: [12900, 12300, 11600], milk: "vaca", cure: 180, badge: "Edição limitada", stockBoxes: 8, sales: 60, description: "Longa maturação em tulha de madeira. Notas de castanha." },
-    { sku: "REQ-C500", slug: "requeijao-de-corte", name: "Requeijão de Corte", producer: "casa-dona-zita", category: "manteigas-derivados", unit: "peça", grams: 500, retail: 3990, box: 10, tiers: [3290, 3090, 2890], milk: "vaca", tag: "Receita mineira", stockBoxes: 30, sales: 260, description: "Casquinha dourada e massa firme que derrete na chapa." },
-    { sku: "DDL-B300", slug: "doce-de-leite-em-barra", name: "Doce de Leite em Barra", producer: "casa-dona-zita", category: "doce-de-leite", unit: "barra", grams: 300, retail: 2250, box: 20, tiers: [1790, 1650, 1520], milk: "vaca", tag: "Receita de tacho", stockBoxes: 70, sales: 390, description: "Cortado à faca, textura açucarada por fora e macia por dentro." },
-    { sku: "DDL-Z400", slug: "doce-de-leite-zero-acucar", name: "Doce de Leite Zero Açúcar", producer: "casa-dona-zita", category: "doce-de-leite", unit: "vidro", grams: 400, retail: 3890, box: 12, tiers: [3190, 2990, 2790], milk: "vaca", tag: "Zero açúcar", stockBoxes: 35, sales: 150, description: "Adoçado com eritritol, mesma cremosidade do tradicional." },
+    { sku: "CAN-RC1K", slug: "canastra-real-curado", name: "Canastra Real Curado", producer: "fazenda-capao-grande", category: "queijos-maturados", unit: "peça", grams: 1000, retail: 13990, box: 6, tiers: [11740, 11160, 10570], milk: "vaca", tag: "Leite cru", cure: 90, badge: "Super Ouro • Mondial", awarded: true, stockBoxes: 18, sales: 180, description: "90 dias de cura: casca firme, massa cristalina e sabor profundo." },
+    { sku: "TUL-180", slug: "queijo-tulha-180-dias", name: "Queijo Tulha 180 dias", producer: "laticinio-serra-clara", category: "queijos-maturados", unit: "peça", grams: 1200, retail: 17990, box: 4, tiers: [15580, 14850, 14010], milk: "vaca", cure: 180, badge: "Edição limitada", stockBoxes: 8, sales: 60, description: "Longa maturação em tulha de madeira. Notas de castanha." },
+    { sku: "REQ-C500", slug: "requeijao-de-corte", name: "Requeijão de Corte", producer: "casa-dona-zita", category: "manteigas-derivados", unit: "peça", grams: 500, retail: 5990, box: 10, tiers: [4940, 4640, 4340], milk: "vaca", tag: "Receita mineira", stockBoxes: 30, sales: 260, description: "Casquinha dourada e massa firme que derrete na chapa." },
+    { sku: "DDL-B300", slug: "doce-de-leite-em-barra", name: "Doce de Leite em Barra", producer: "casa-dona-zita", category: "doce-de-leite", unit: "barra", grams: 300, retail: 1290, box: 20, tiers: [1030, 950, 870], milk: "vaca", tag: "Receita de tacho", stockBoxes: 70, sales: 390, description: "Cortado à faca, textura açucarada por fora e macia por dentro." },
+    { sku: "DDL-Z400", slug: "doce-de-leite-zero-acucar", name: "Doce de Leite Zero Açúcar", producer: "casa-dona-zita", category: "doce-de-leite", unit: "vidro", grams: 400, retail: 4990, box: 12, tiers: [4090, 3840, 3580], milk: "vaca", tag: "Zero açúcar", stockBoxes: 35, sales: 150, description: "Adoçado com eritritol, mesma cremosidade do tradicional." },
   ];
 
   const productIds: Record<string, number> = {};
@@ -153,7 +154,7 @@ await sql.begin(async (tx) => {
     average_payment_days: 7,
   };
   for (const [key, value] of Object.entries(settings)) {
-    await tx`insert into site_settings (key, value) values (${key}, ${JSON.stringify(value)}::jsonb)`;
+    await tx`insert into site_settings (key, value) values (${key}, ${JSON.stringify(value)}::text::jsonb)`;
   }
 
   // Usuários de demonstração (senha = SEED_PASSWORD)
@@ -205,7 +206,7 @@ await sql.begin(async (tx) => {
       insert into orders (user_id, channel, status, subtotal_cents, shipping_cents, total_cents, cep, address,
                           delivery_region_id, scheduled_delivery, created_at, updated_at, shipped_at)
       values (${userId}, ${lines.some((l) => l.mode === "box") ? "wholesale" : "retail"}, ${o.status}, ${subtotal},
-              ${region.fee_cents}, ${subtotal + region.fee_cents}, ${cep}, ${JSON.stringify(address)}::jsonb, ${region.id},
+              ${region.fee_cents}, ${subtotal + region.fee_cents}, ${cep}, ${JSON.stringify(address)}::text::jsonb, ${region.id},
               ${day(shipped ? -Math.floor(o.hoursAgo / 24) + 1 : 2)}, ${createdAt}, ${createdAt},
               ${shipped ? new Date(Date.now() - (o.hoursAgo - 12) * 3_600_000).toISOString() : null})
       returning id, code`;
@@ -244,6 +245,14 @@ await sql.begin(async (tx) => {
   await seedOrder({ who: "emporio", status: "confirmed", hoursAgo: 26, items: [{ sku: "TUL-180", mode: "box", quantity: 6 }, { sku: "AZU-M480", mode: "box", quantity: 2 }] });
   await seedOrder({ who: "emporio", status: "pending", hoursAgo: 8, items: [{ sku: "CAN-RC1K", mode: "box", quantity: 16 }] });
   await seedOrder({ who: "cliente", status: "pending", hoursAgo: 3, items: [{ sku: "TUL-180", mode: "unit", quantity: 1 }, { sku: "DDL-C450", mode: "unit", quantity: 2 }] });
+
+  // Validade padrão (mesma da migração 0004) e lotes reconstruídos a partir das movimentações acima.
+  const SHELF_LIFE: Record<string, number> = {
+    "MIN-F500": 15, "RIC-F400": 10, "CAB-F250": 14, "CAN-MC600": 60, "CAN-RC1K": 90, "TUL-180": 180,
+    "AZU-M480": 30, "MAN-C200": 150, "REQ-C500": 30, "DDL-C450": 180, "DDL-B300": 365, "DDL-Z400": 120,
+  };
+  for (const [sku, days] of Object.entries(SHELF_LIFE)) await tx`update products set shelf_life_days = ${days} where sku = ${sku}`;
+  await tx`select rebuild_stock_batches()`;
 });
 
 console.log("Seed concluído: 4 categorias, 5 produtores, 12 produtos, 5 regiões, 3 usuários e 6 pedidos de demonstração.");

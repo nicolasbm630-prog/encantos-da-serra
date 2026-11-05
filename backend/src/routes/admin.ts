@@ -3,20 +3,34 @@ import { z } from "zod";
 import { db } from "../db";
 import { config } from "../config";
 import { adminAccess, currentUser } from "../lib/auth";
-import { badRequest, conflict, notFound } from "../lib/errors";
-import { slugify } from "../lib/text";
+import { AppError, badRequest, conflict, notFound } from "../lib/errors";
+import { randomToken, slugify } from "../lib/text";
+import { storageReady, uploadPublicFile } from "../lib/storage";
 import type { AppEnv } from "../lib/types";
-import { uploadPath } from "../lib/uploads";
+import { detectFileType, uploadPath } from "../lib/uploads";
 import { isUniqueViolation, validate } from "../lib/validate";
-import { findProduct, productSearchText } from "../repos/products";
+import { findProduct, PRODUCT_COLUMNS, PRODUCT_FROM, productSearchText, toProductDto, type ProductRow } from "../repos/products";
 import { getOrder } from "../repos/checkout";
-import { applyMovement, inventoryOverview, ORDER_FILTERS, ordersBoard, productMovements, transitionOrder } from "../repos/inventory";
+import { applyMovement, inventoryOverview, ORDER_FILTERS, ordersBoard, productBatches, productMovements, transitionOrder } from "../repos/inventory";
 
 const tierSchema = z.object({
   minBoxes: z.number().int().min(1),
   maxBoxes: z.number().int().min(1).nullable(),
   unitPriceCents: z.number().int().positive(),
 });
+
+// Faixas ordenadas por "de", sem sobreposição; só a última pode ficar sem limite ("até" vazio).
+const tiersSchema = z.array(tierSchema).min(1).superRefine((tiers, ctx) => {
+  const sorted = [...tiers].sort((a, b) => a.minBoxes - b.minBoxes);
+  sorted.forEach((t, i) => {
+    const next = sorted[i + 1];
+    if (t.maxBoxes !== null && t.maxBoxes < t.minBoxes) ctx.addIssue({ code: "custom", message: `Faixa ${t.minBoxes}: "até" menor que "de"` });
+    if (next && (t.maxBoxes === null || t.maxBoxes >= next.minBoxes)) ctx.addIssue({ code: "custom", message: "As faixas de caixas se sobrepõem" });
+  });
+});
+
+// Foto: URL completa ou caminho das imagens do próprio site (/images/...).
+const imageSchema = z.union([z.url(), z.string().regex(/^\/images\/[\w\-/.]+$/, "Use uma URL ou um caminho /images/...").refine((v) => !v.includes(".."))]);
 
 const productSchema = z.object({
   name: z.string().trim().min(2),
@@ -32,14 +46,30 @@ const productSchema = z.object({
   milkType: z.enum(["vaca", "cabra", "bufala", "misto", "nenhum"]),
   detailTag: z.string().optional(),
   cureDays: z.number().int().min(0).optional(),
+  // Dias de validade contados da entrada no estoque; null = sem controle de validade.
+  shelfLifeDays: z.number().int().min(1).max(3650).nullable().default(null),
   badge: z.string().optional(),
   awarded: z.boolean().default(false),
-  imageUrl: z.url().optional(),
+  imageUrl: imageSchema.optional(),
   stockUnits: z.number().int().min(0).default(0),
   featured: z.boolean().default(false),
   active: z.boolean().default(true),
-  tiers: z.array(tierSchema).min(1),
+  tiers: tiersSchema,
 });
+
+// Edição completa no painel (estoque muda só por movimentação).
+const productUpdateSchema = productSchema.omit({ stockUnits: true });
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+// JPG e PNG pela assinatura comum; WebP é "RIFF....WEBP".
+function detectImage(bytes: Uint8Array) {
+  const known = detectFileType(bytes.subarray(0, 8));
+  if (known && known.mime.startsWith("image/")) return known;
+  const ascii = (a: number, b: number) => String.fromCharCode(...bytes.subarray(a, b));
+  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return { mime: "image/webp", ext: "webp" };
+  return undefined;
+}
 
 const movementSchema = z.object({
   kind: z.enum(["entrada", "saida", "perda", "contagem"]),
@@ -84,7 +114,48 @@ export const adminRoutes = new Hono<AppEnv>()
     return c.json({ summary });
   })
 
-  // Produtos
+  // Produtos: lista completa para o painel, inclusive inativos.
+  .get("/products", async (c) => {
+    const rows: (ProductRow & { min_stock_units: number; shelf_life_days: number | null })[] = await db().unsafe(
+      `select ${PRODUCT_COLUMNS}, p.min_stock_units, p.shelf_life_days ${PRODUCT_FROM} order by p.active desc, c.sort_order, p.name`,
+    );
+    return c.json({ products: rows.map((r) => ({ ...toProductDto(r), active: r.active, availableUnits: r.stock_units, shelfLifeDays: r.shelf_life_days })) });
+  })
+
+  // Opções dos campos de seleção do formulário de produto.
+  .get("/products/options", async (c) => {
+    const [producers, categories, images] = await Promise.all([
+      db()`select id, name, city, state from producers order by name`,
+      db()`select id, name from categories order by sort_order, name`,
+      db()`select distinct image_url as url from products where image_url is not null order by 1`,
+    ]);
+    return c.json({ producers, categories, images: images.map((i: { url: string }) => i.url) });
+  })
+
+  // Foto do produto: vai para o Supabase Storage e devolve a URL pública.
+  .post("/products/image", async (c) => {
+    if (!storageReady()) throw new AppError(503, "storage_not_configured", "Upload de fotos indisponível: configure SUPABASE_SECRET_KEY no backend");
+    const form = await c.req.formData().catch(() => null);
+    const file = form?.get("file");
+    if (!(file instanceof File) || file.size === 0) throw badRequest("Envie um arquivo de imagem");
+    if (file.size > MAX_IMAGE_BYTES) throw badRequest("A foto pode ter no máximo 5 MB");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const type = detectImage(bytes);
+    if (!type) throw badRequest("Formato não aceito: envie JPG, PNG ou WebP");
+    const base = slugify(file.name.replace(/\.[^.]+$/, "")).slice(0, 40) || "foto";
+    const url = await uploadPublicFile(`catalogo/${base}-${randomToken(6)}.${type.ext}`, bytes, type.mime);
+    return c.json({ url }, 201);
+  })
+
+  .get("/products/:id", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) throw notFound("Produto");
+    const rows: (ProductRow & { shelf_life_days: number | null })[] = await db().unsafe(
+      `select ${PRODUCT_COLUMNS}, p.shelf_life_days ${PRODUCT_FROM} where p.id = $1`, [id]);
+    if (!rows[0]) throw notFound("Produto");
+    return c.json({ product: { ...toProductDto(rows[0]), active: rows[0].active, shelfLifeDays: rows[0].shelf_life_days } });
+  })
+
   .post("/products", validate("json", productSchema), async (c) => {
     const b = c.req.valid("json");
     try {
@@ -92,11 +163,11 @@ export const adminRoutes = new Hono<AppEnv>()
         const [row] = await tx`
           insert into products (slug, sku, name, description, producer_id, category_id, unit_label, weight_grams,
             retail_price_cents, box_size, milk_type, detail_tag, cure_days, badge, awarded, image_url, stock_units,
-            featured, active, search_text)
+            featured, active, search_text, shelf_life_days)
           values (${b.slug ?? slugify(b.name)}, ${b.sku}, ${b.name}, ${b.description ?? null}, ${b.producerId},
             ${b.categoryId}, ${b.unitLabel}, ${b.weightGrams}, ${b.retailPriceCents}, ${b.boxSize}, ${b.milkType},
             ${b.detailTag ?? null}, ${b.cureDays ?? null}, ${b.badge ?? null}, ${b.awarded}, ${b.imageUrl ?? null},
-            0, ${b.featured}, ${b.active}, ${productSearchText(b)})
+            0, ${b.featured}, ${b.active}, ${productSearchText(b)}, ${b.shelfLifeDays})
           returning id`;
         await replaceTiers(tx, row.id, b.tiers);
         if (b.stockUnits > 0) {
@@ -109,6 +180,35 @@ export const adminRoutes = new Hono<AppEnv>()
       if (isUniqueViolation(error)) throw conflict("SKU ou slug já existe");
       throw error;
     }
+  })
+
+  .put("/products/:id", validate("json", productUpdateSchema), async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) throw notFound("Produto");
+    const b = c.req.valid("json");
+    try {
+      await db().begin(async (tx) => {
+        const [row] = await tx`
+          update products set
+            sku = ${b.sku}, name = ${b.name}, description = ${b.description ?? null}, producer_id = ${b.producerId},
+            category_id = ${b.categoryId}, unit_label = ${b.unitLabel}, weight_grams = ${b.weightGrams},
+            retail_price_cents = ${b.retailPriceCents}, box_size = ${b.boxSize}, milk_type = ${b.milkType},
+            detail_tag = ${b.detailTag ?? null}, cure_days = ${b.cureDays ?? null}, badge = ${b.badge ?? null},
+            awarded = ${b.awarded}, image_url = ${b.imageUrl ?? null}, featured = ${b.featured}, active = ${b.active},
+            search_text = ${productSearchText(b)}, shelf_life_days = ${b.shelfLifeDays}, updated_at = now()
+          where id = ${id} returning id`;
+        if (!row) throw notFound("Produto");
+        await replaceTiers(tx, id, b.tiers);
+        // A validade conta da entrada: mudar o prazo recalcula o vencimento dos lotes que ainda têm saldo.
+        await tx`
+          update stock_batches set expires_at = received_at + make_interval(days => ${b.shelfLifeDays})
+          where product_id = ${id} and quantity > 0`;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw conflict("Já existe outro produto com esse SKU");
+      throw error;
+    }
+    return c.json({ product: await findProduct({ id }) });
   })
 
   .patch(
@@ -155,7 +255,9 @@ export const adminRoutes = new Hono<AppEnv>()
   .get("/inventory", async (c) => c.json(await inventoryOverview()))
 
   .get("/inventory/:productId/movements", async (c) => {
-    return c.json({ movements: await productMovements(Number(c.req.param("productId"))) });
+    const productId = Number(c.req.param("productId"));
+    const [movements, batches] = await Promise.all([productMovements(productId), productBatches(productId)]);
+    return c.json({ movements, batches });
   })
 
   .post("/inventory/:productId/movements", validate("json", movementSchema), async (c) => {

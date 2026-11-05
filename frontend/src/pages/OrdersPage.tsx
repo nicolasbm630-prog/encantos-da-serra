@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Order } from "../api";
 import { brl, dateTime, longDate, shortDate, STATUS_LABEL } from "../format";
+import { ChangeDelivery } from "../components/ChangeDelivery";
 import { Icon } from "../icons";
 import { Link, navigate, useLocation } from "../router";
 import { useApi, useStore } from "../store";
@@ -22,6 +23,12 @@ export function OrderView({ order }: { order: Order }) {
           ))}
         </ol>
         {order.scheduledDelivery && <div className="notice ok" style={{ marginTop: 8 }}><Icon name="truck" className="icon-sm" style={{ verticalAlign: "-3px" }} /> Rota prevista: {shortDate(order.scheduledDelivery)} — {order.deliveryRegion}</div>}
+        {order.address && (
+          <p className="muted" style={{ margin: "12px 0 0" }}>
+            Entregar para <b style={{ color: "var(--ink)" }}>{order.address.recipient}</b>: {order.address.street}, {order.address.number}
+            {order.address.complement ? ` (${order.address.complement})` : ""} · {order.address.district}, {order.address.city}/{order.address.state} · CEP {order.cep.replace(/(\d{5})(\d{3})/, "$1-$2")}
+          </p>
+        )}
       </div>
       <div className="card" style={{ padding: 24 }}>
         <h3 style={{ fontSize: 20, marginBottom: 12 }}>Itens e lotes</h3>
@@ -87,14 +94,19 @@ export function OrdersPage() {
 
 export function OrderDetailPage({ code }: { code: string }) {
   const { user, ready } = useStore();
-  const { data, error, loading } = useApi<{ order: Order }>(user ? `/orders/${code}` : null, [user?.id]);
+  const { data, error, loading, setData } = useApi<{ order: Order }>(user ? `/orders/${code}` : null, [user?.id]);
   useEffect(() => { if (ready && !user) navigate(`/entrar?next=/pedidos/${code}`, { replace: true }); }, [ready, user, code]);
   return (
     <div className="container" style={{ paddingBottom: 96 }}>
       <div className="page-head">
         <nav className="breadcrumb"><Link to="/pedidos">Meus pedidos</Link><span>/</span><span>{code}</span></nav>
       </div>
-      {loading || !ready ? <div className="skeleton" style={{ height: 320 }} /> : error ? <div className="card empty"><h3>Pedido não encontrado</h3></div> : data && <OrderView order={data.order} />}
+      {loading || !ready ? <div className="skeleton" style={{ height: 320 }} /> : error ? <div className="card empty"><h3>Pedido não encontrado</h3></div> : data && (
+        <>
+          <OrderView order={data.order} />
+          <ChangeDelivery key={data.order.code} order={data.order} onChanged={(order) => setData({ order })} />
+        </>
+      )}
     </div>
   );
 }

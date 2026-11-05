@@ -14,7 +14,7 @@ export const PRODUCT_COLUMNS = `
     from price_tiers t where t.product_id = p.id
   ), '[]'::json) as tiers`;
 
-// stock_units aqui é o DISPONÍVEL para venda (físico − reservado em pedidos abertos), via view product_stock.
+// stock_units aqui é o DISPONÍVEL para venda (físico − vencido − reservado em pedidos abertos), via view product_stock.
 export const PRODUCT_FROM = `from products p join producers pr on pr.id = p.producer_id join categories c on c.id = p.category_id
   join product_stock ps on ps.product_id = p.id`;
 

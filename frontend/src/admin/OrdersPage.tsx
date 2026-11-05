@@ -178,6 +178,7 @@ export function OrdersPage() {
                       <td className="nowrap">
                         {o.scheduledDelivery ? shortDate(o.scheduledDelivery) : "—"}
                         <small className="adm-muted">{o.region ?? o.cep}</small>
+                        {o.deliveryChangedAt && !o.shippedAt && <small className="adm-changed" title={`Alterada em ${dateTime(o.deliveryChangedAt)}`}>Entrega alterada</small>}
                       </td>
                       <td className="num">{brl(o.totalCents)}</td>
                       <td><span className="status" data-status={o.status}>{STATUS_LABEL[o.status]}</span></td>
@@ -297,7 +298,7 @@ function OrderDetail({ order: o, onAction }: { order: BoardOrder; onAction: (to:
           <dt>Cliente</dt><dd>{o.customerName}{o.tradeName ? ` · ${o.tradeName}` : ""}</dd>
           <dt>E-mail</dt><dd>{o.customerEmail}</dd>
           <dt>Região</dt><dd>{o.region ?? "—"} · CEP {o.cep.replace(/(\d{5})(\d{3})/, "$1-$2")}</dd>
-          <dt>Rota prevista</dt><dd>{o.scheduledDelivery ? shortDate(o.scheduledDelivery) : "—"}</dd>
+          <dt>Rota prevista</dt><dd>{o.scheduledDelivery ? shortDate(o.scheduledDelivery) : "—"}{o.deliveryChangedAt && <> · <b className="adm-changed-inline">alterada em {dateTime(o.deliveryChangedAt)}</b></>}</dd>
           <dt>Recebido em</dt><dd>{dateTime(o.createdAt)}</dd>
         </dl>
         {o.nextStatuses.includes("cancelled") && (

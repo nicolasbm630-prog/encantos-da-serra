@@ -89,14 +89,41 @@ function Search() {
   );
 }
 
+// Esconde o cabeçalho ao rolar para baixo e mostra de novo ao rolar para cima.
+// Fica visível no topo da página, com o menu aberto ou com o foco do teclado (ou a busca) dentro dele.
+function useHideOnScroll(keepVisible: boolean) {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    let last = window.scrollY;
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const y = window.scrollY;
+        // Só segura o cabeçalho para foco de teclado ou campo de texto: depois de um clique no menu o link continua focado.
+        const el = document.activeElement;
+        const focusInside = el?.closest(".header") && el.matches(":focus-visible");
+        if (y < 120 || focusInside) setHidden(false);
+        else if (y > last + 6) setHidden(true);
+        else if (y < last - 6) setHidden(false);
+        last = y;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("scroll", onScroll); cancelAnimationFrame(frame); };
+  }, []);
+  return hidden && !keepVisible;
+}
+
 export function Header() {
   const { pathname } = useLocation();
   const { user, cartCount, logout } = useStore();
   const [menu, setMenu] = useState(false);
+  const hidden = useHideOnScroll(menu);
   useEffect(() => setMenu(false), [pathname]);
 
   return (
-    <header className="header">
+    <header className="header" data-hidden={hidden}>
       <div className="container">
         <div className="header-row">
           <button className="menu-btn" aria-label="Menu" aria-expanded={menu} aria-controls="mobile-nav" onClick={() => setMenu((m) => !m)}>

@@ -25,3 +25,6 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false
+      # Chave secreta do Supabase para enviar fotos ao Storage (Project Settings → API Keys).
+      - key: SUPABASE_SECRET_KEY
+        sync: false

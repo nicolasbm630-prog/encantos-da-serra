@@ -7,6 +7,7 @@ import { addressSchema, cepSchema } from "../lib/schemas";
 import type { AppEnv } from "../lib/types";
 import { validate } from "../lib/validate";
 import { createOrder, getOrder } from "../repos/checkout";
+import { changeDelivery, deliveryOptions } from "../repos/orderDelivery";
 import { cartItems } from "./cart";
 
 const checkoutSchema = z.object({
@@ -14,6 +15,12 @@ const checkoutSchema = z.object({
   cep: cepSchema,
   address: addressSchema,
   notes: z.string().max(500).optional(),
+});
+
+const deliveryChangeSchema = z.object({
+  cep: cepSchema,
+  address: addressSchema,
+  scheduledDelivery: z.iso.date(),
 });
 
 const trackSchema = z.object({ code: z.string().trim().min(5), email: z.email() });
@@ -63,6 +70,15 @@ export const orderRoutes = new Hono<AppEnv>()
              (select count(*)::int from order_items i where i.order_id = o.id) as "itemCount"
       from orders o where user_id = ${user.id} order by created_at desc limit 50`;
     return c.json({ orders });
+  })
+
+  // Alterar entrega: opções (frete, datas, prazo) para um CEP e a gravação da mudança.
+  .get("/:code/delivery-options", validate("query", z.object({ cep: cepSchema.optional() })), async (c) => {
+    return c.json(await deliveryOptions(c.req.param("code"), currentUser(c), c.req.valid("query").cep));
+  })
+
+  .patch("/:code/delivery", validate("json", deliveryChangeSchema), async (c) => {
+    return c.json({ order: await changeDelivery(c.req.param("code"), currentUser(c), c.req.valid("json")) });
   })
 
   .get("/:code", async (c) => {

@@ -9,7 +9,8 @@
     "db:migrate": "bun src/scripts/migrate.ts",
     "db:seed": "bun src/scripts/seed.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "images:upload": "bun src/scripts/upload-images.ts"
   },
   "dependencies": {
     "@hono/zod-validator": "0.9.1",

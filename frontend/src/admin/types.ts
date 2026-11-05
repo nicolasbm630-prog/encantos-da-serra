@@ -9,6 +9,7 @@ export type BoardOrder = {
   createdAt: string;
   scheduledDelivery: string | null;
   shippedAt: string | null;
+  deliveryChangedAt: string | null;
   cep: string;
   customerName: string;
   customerEmail: string;
@@ -45,11 +46,21 @@ export type InventoryProduct = {
   shortUnits: number;
   openOrders: number;
   status: StockStatus;
+  shelfLifeDays: number | null;
+  nextExpiry: string | null;
+  expiredUnits: number;
+  expiringUnits: number;
+  expiry: "vencido" | "vencendo" | null;
 };
+
+export type Batch = { id: number; receivedAt: string; expiresAt: string | null; initial: number; quantity: number };
+
+// Dias inteiros até a data (negativo = já passou).
+export const daysUntil = (iso: string) => Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
 
 export type Inventory = {
   products: InventoryProduct[];
-  summary: { skus: number; withShortage: number; belowMinimum: number; reservedUnits: number; onHandUnits: number };
+  summary: { skus: number; withShortage: number; belowMinimum: number; reservedUnits: number; onHandUnits: number; expiring: number; expiredUnits: number };
 };
 
 export type Movement = { id: number; kind: string; quantity: number; stockAfter: number; note: string | null; createdAt: string; orderCode: string | null; userName: string | null };
@@ -102,3 +113,20 @@ export const timeAgo = (iso: string) => {
   if (h < 48) return `há ${h} h`;
   return `há ${Math.round(h / 24)} dias`;
 };
+
+// Produto como o painel vê: inclui inativos e o saldo disponível em unidades.
+export type AdminProduct = import("../api").Product & { active: boolean; availableUnits?: number; shelfLifeDays: number | null };
+
+export type ProductOptions = {
+  producers: { id: number; name: string; city: string; state: string }[];
+  categories: { id: number; name: string }[];
+  images: string[];
+};
+
+export const MILK_OPTIONS = [
+  { value: "vaca", label: "Leite de vaca" },
+  { value: "cabra", label: "Leite de cabra" },
+  { value: "bufala", label: "Leite de búfala" },
+  { value: "misto", label: "Leite misto" },
+  { value: "nenhum", label: "Não se aplica" },
+] as const;

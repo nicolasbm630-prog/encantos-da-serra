@@ -33,14 +33,73 @@ export async function applyMovement(
     )
     insert into stock_movements (product_id, kind, quantity, stock_after, note, order_id, user_id)
     select id, ${m.kind}, ${m.delta}, stock_units, ${m.note ?? null}, ${m.orderId ?? null}, ${m.userId ?? null} from upd
-    returning stock_after`;
+    returning id, stock_after`;
   if (!row) {
     const [p] = await tx`select name, stock_units from products where id = ${m.productId}`;
     if (!p) throw notFound("Produto");
     throw new AppError(409, "insufficient_stock",
       `Estoque físico insuficiente de ${p.name}: há ${p.stock_units} un e a operação pede ${-m.delta} un`);
   }
+  if (m.delta > 0) await addToBatches(tx, m.productId, row.id, m.delta, m.kind === "devolucao" ? m.orderId : null);
+  if (m.delta < 0) await takeFromBatches(tx, m.productId, row.id, -m.delta, m.kind === "expedicao");
   return row.stock_after as number;
+}
+
+// Saída: consome primeiro o lote que vence antes (FEFO) e registra de qual lote saiu.
+// Expedição só usa lotes dentro da validade: produto vencido nunca vai para o cliente.
+async function takeFromBatches(tx: SQL, productId: number, movementId: number, units: number, validOnly = false) {
+  const batches = await tx`
+    select id, quantity from stock_batches
+    where product_id = ${productId} and quantity > 0 and (${!validOnly} or expires_at is null or expires_at > now())
+    order by expires_at nulls last, received_at, id for update`;
+  let need = units;
+  for (const b of batches) {
+    if (need === 0) break;
+    const take = Math.min(need, b.quantity);
+    await tx`update stock_batches set quantity = quantity - ${take} where id = ${b.id}`;
+    await tx`insert into stock_batch_moves (movement_id, batch_id, quantity) values (${movementId}, ${b.id}, ${-take})`;
+    need -= take;
+  }
+  if (need > 0 && validOnly) {
+    const [p] = await tx`select name from products where id = ${productId}`;
+    throw new AppError(409, "expired_stock",
+      `Estoque dentro da validade insuficiente de ${p?.name}: faltam ${need} un. Registre a perda das vencidas e uma nova entrada.`);
+  }
+}
+
+// Entrada: novo lote que vence em "agora + validade do produto". Devolução de pedido volta aos lotes de origem.
+async function addToBatches(tx: SQL, productId: number, movementId: number, units: number, orderId?: number | null) {
+  let left = units;
+  if (orderId) {
+    const origins = await tx`
+      select bm.batch_id, sum(-bm.quantity)::int as units
+      from stock_batch_moves bm join stock_movements sm on sm.id = bm.movement_id
+      where sm.order_id = ${orderId} and sm.product_id = ${productId} and sm.kind = 'expedicao' and bm.quantity < 0
+      group by bm.batch_id order by bm.batch_id`;
+    for (const o of origins) {
+      if (left === 0) break;
+      const back = Math.min(left, o.units);
+      await tx`update stock_batches set quantity = quantity + ${back} where id = ${o.batch_id}`;
+      await tx`insert into stock_batch_moves (movement_id, batch_id, quantity) values (${movementId}, ${o.batch_id}, ${back})`;
+      left -= back;
+    }
+  }
+  if (left > 0) {
+    const [b] = await tx`
+      insert into stock_batches (product_id, received_at, expires_at, initial, quantity, movement_id)
+      select id, now(), now() + make_interval(days => shelf_life_days), ${left}, ${left}, ${movementId}
+      from products where id = ${productId}
+      returning id`;
+    await tx`insert into stock_batch_moves (movement_id, batch_id, quantity) values (${movementId}, ${b.id}, ${left})`;
+  }
+}
+
+// Lotes com saldo, do que vence antes para o que vence depois.
+export async function productBatches(productId: number) {
+  return db()`
+    select id, received_at as "receivedAt", expires_at as "expiresAt", initial, quantity
+    from stock_batches where product_id = ${productId} and quantity > 0
+    order by expires_at nulls last, received_at, id`;
 }
 
 export async function transitionOrder(
@@ -103,7 +162,8 @@ export async function openOrdersCoverage() {
         coalesce((select json_agg(json_build_object('productId', i.product_id, 'units', i.units) order by i.id)
                   from order_items i where i.order_id = o.id), '[]'::json) as items
       from orders o where o.status in ('pending', 'confirmed', 'preparing')` as Promise<OpenOrderRow[]>,
-    db()`select id, stock_units from products` as Promise<{ id: number; stock_units: number }[]>,
+    // Só o que está dentro da validade cobre pedido.
+    db()`select product_id as id, on_hand - expired as stock_units from product_stock` as Promise<{ id: number; stock_units: number }[]>,
   ]);
   const onHand = new Map(stock.map((s) => [s.id, s.stock_units]));
   const parsed = orders.map((o) => ({
@@ -120,11 +180,15 @@ export async function openOrdersCoverage() {
 }
 
 export type StockStatus = "falta" | "zerado" | "baixo" | "ok";
+export type ExpiryStatus = "vencido" | "vencendo" | null;
+
+// Produtos com lote vencendo dentro deste prazo aparecem em "Precisa de atenção".
+export const EXPIRY_WARNING_DAYS = 10;
 
 type InventoryRow = {
   id: number; sku: string; name: string; slug: string; imageUrl: string | null; unitLabel: string; boxSize: number;
   minStockUnits: number; active: boolean; producerName: string; onHand: number; reserved: number; available: number;
-  lastMovementAt: Date | null;
+  lastMovementAt: Date | null; shelfLifeDays: number | null; nextExpiry: Date | null; expiredUnits: number; expiringUnits: number;
 };
 
 export async function inventoryOverview() {
@@ -133,8 +197,16 @@ export async function inventoryOverview() {
       select p.id, p.sku, p.name, p.slug, p.image_url as "imageUrl", p.unit_label as "unitLabel", p.box_size as "boxSize",
              p.min_stock_units as "minStockUnits", p.active, pr.name as "producerName",
              ps.on_hand as "onHand", ps.reserved, ps.available,
-             (select max(created_at) from stock_movements m where m.product_id = p.id) as "lastMovementAt"
-      from products p join producers pr on pr.id = p.producer_id join product_stock ps on ps.product_id = p.id
+             (select max(created_at) from stock_movements m where m.product_id = p.id) as "lastMovementAt",
+             p.shelf_life_days as "shelfLifeDays", b.next_expiry as "nextExpiry",
+             coalesce(b.expired, 0)::int as "expiredUnits", coalesce(b.expiring, 0)::int as "expiringUnits"
+      from products p
+      left join lateral (
+        select min(expires_at) as next_expiry,
+               sum(quantity) filter (where expires_at <= now()) as expired,
+               sum(quantity) filter (where expires_at > now() and expires_at <= now() + make_interval(days => ${EXPIRY_WARNING_DAYS})) as expiring
+        from stock_batches sb where sb.product_id = p.id and sb.quantity > 0
+      ) b on true join producers pr on pr.id = p.producer_id join product_stock ps on ps.product_id = p.id
       order by p.name` as Promise<InventoryRow[]>,
     openOrdersCoverage(),
   ]);
@@ -142,10 +214,13 @@ export async function inventoryOverview() {
   const products = rows.map((r) => {
     const shortUnits = coverage.shortByProduct.get(r.id) ?? 0;
     const status: StockStatus = shortUnits > 0 ? "falta" : r.available <= 0 ? "zerado" : r.available < r.minStockUnits ? "baixo" : "ok";
-    return { ...r, shortUnits, openOrders: coverage.openByProduct.get(r.id)?.size ?? 0, status };
+    const expiry: ExpiryStatus = r.expiredUnits > 0 ? "vencido" : r.expiringUnits > 0 ? "vencendo" : null;
+    return { ...r, shortUnits, openOrders: coverage.openByProduct.get(r.id)?.size ?? 0, status, expiry };
   });
-  const rank: Record<StockStatus, number> = { falta: 0, zerado: 1, baixo: 2, ok: 3 };
-  products.sort((a, b) => rank[a.status as StockStatus] - rank[b.status as StockStatus] || a.name.localeCompare(b.name));
+  // Primeiro o que precisa de ação: falta para pedidos, validade, saldo zerado, abaixo do mínimo.
+  const rank = (p: (typeof products)[number]) =>
+    p.status === "falta" ? 0 : p.expiry === "vencido" ? 1 : p.expiry === "vencendo" ? 2 : p.status === "zerado" ? 3 : p.status === "baixo" ? 4 : 5;
+  products.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 
   return {
     products,
@@ -153,6 +228,8 @@ export async function inventoryOverview() {
       skus: products.length,
       withShortage: products.filter((p) => p.status === "falta").length,
       belowMinimum: products.filter((p) => p.status === "baixo" || p.status === "zerado").length,
+      expiring: products.filter((p) => p.expiry).length,
+      expiredUnits: products.reduce((acc, p) => acc + p.expiredUnits, 0),
       reservedUnits: products.reduce((acc, p) => acc + p.reserved, 0),
       onHandUnits: products.reduce((acc, p) => acc + p.onHand, 0),
     },
@@ -172,6 +249,7 @@ export async function ordersBoard(filter: (typeof ORDER_FILTERS)[number], q?: st
     db().unsafe(
       `select o.id, o.code, o.channel, o.status, o.total_cents as "totalCents", o.created_at as "createdAt",
               o.scheduled_delivery::text as "scheduledDelivery", o.shipped_at as "shippedAt", o.cep,
+              o.delivery_changed_at as "deliveryChangedAt",
               u.name as "customerName", u.email as "customerEmail", b.trade_name as "tradeName", dr.name as "region",
               coalesce((select json_agg(json_build_object('productId', i.product_id, 'name', i.product_name, 'sku', p.sku,
                          'imageUrl', p.image_url, 'mode', i.mode, 'quantity', i.quantity, 'units', i.units,

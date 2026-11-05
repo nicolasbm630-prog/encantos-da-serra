@@ -1,14 +1,26 @@
 import { useEffect } from "react";
 import { BrandMark, Icon } from "../icons";
-import { Link, navigate, useLocation } from "../router";
+import { Link, matchPath, navigate, useLocation } from "../router";
 import { useApi, useStore } from "../store";
 import { InventoryPage } from "./InventoryPage";
 import { OrdersPage } from "./OrdersPage";
+import { ProductForm } from "./ProductForm";
+import { ProductsPage } from "./ProductsPage";
 
 const TABS = [
   { to: "/admin", label: "Pedidos", icon: "receipt" as const },
   { to: "/admin/estoque", label: "Estoque", icon: "boxes" as const },
+  { to: "/admin/produtos", label: "Produtos", icon: "layers" as const },
 ];
+
+function Section({ pathname }: { pathname: string }) {
+  if (pathname === "/admin/produtos/novo") return <ProductForm id={null} />;
+  const edit = matchPath("/admin/produtos/:id", pathname);
+  if (edit) return <ProductForm key={edit.id} id={Number(edit.id)} />;
+  if (pathname.startsWith("/admin/produtos")) return <ProductsPage />;
+  if (pathname.startsWith("/admin/estoque")) return <InventoryPage />;
+  return <OrdersPage />;
+}
 
 export function AdminApp() {
   const { pathname } = useLocation();
@@ -18,7 +30,9 @@ export function AdminApp() {
   const isOpen = access.data?.open ?? false;
 
   useEffect(() => {
-    document.title = `${pathname.startsWith("/admin/estoque") ? "Estoque" : "Pedidos"} · Painel Encantos`;
+    if (pathname.startsWith("/admin/produtos/")) return; // o formulário define o próprio título
+    const section = pathname.startsWith("/admin/estoque") ? "Estoque" : pathname.startsWith("/admin/produtos") ? "Produtos" : "Pedidos";
+    document.title = `${section} · Painel Encantos`;
   }, [pathname]);
 
   if (!ready || access.loading) return <div className="adm-loading"><Icon name="loader" className="icon spin" /></div>;
@@ -68,7 +82,7 @@ export function AdminApp() {
         </div>
       </header>
       <main className="adm-wrap adm-main">
-        {pathname.startsWith("/admin/estoque") ? <InventoryPage /> : <OrdersPage />}
+        <Section pathname={pathname} />
       </main>
     </div>
   );

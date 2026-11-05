@@ -114,7 +114,7 @@ export const wholesaleRoutes = new Hono<AppEnv>()
     }));
     const [quote] = await db()`
       insert into quote_requests (user_id, items, estimated_total_cents, savings_cents, notes)
-      values (${user.id}, ${JSON.stringify(items)}::jsonb, ${view.totals.totalCents}, ${view.totals.savingsCents},
+      values (${user.id}, ${JSON.stringify(items)}::text::jsonb, ${view.totals.totalCents}, ${view.totals.savingsCents},
               ${body.notes ?? null})
       returning code, status, estimated_total_cents as "estimatedTotalCents", savings_cents as "savingsCents",
                 created_at as "createdAt"`;
