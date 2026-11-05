@@ -12,6 +12,7 @@ import { isUniqueViolation, validate } from "../lib/validate";
 import { findProduct, PRODUCT_COLUMNS, PRODUCT_FROM, productSearchText, toProductDto, type ProductRow } from "../repos/products";
 import { getOrder } from "../repos/checkout";
 import { deleteRegion, listRegions, saveRegion } from "../repos/regions";
+import { analytics } from "../repos/analytics";
 import { applyMovement, inventoryOverview, ORDER_FILTERS, ordersBoard, productBatches, productMovements, transitionOrder } from "../repos/inventory";
 
 const tierSchema = z.object({
@@ -128,6 +129,11 @@ export const adminRoutes = new Hono<AppEnv>()
         (select count(*)::int from products p join product_stock ps on ps.product_id = p.id
            where p.active and ps.available < p.min_stock_units) as "lowStockProducts"`;
     return c.json({ summary });
+  })
+
+  // Dashboard: vendas, mix, estoque e pendências. days = 0 → todo o histórico.
+  .get("/analytics", validate("query", z.object({ days: z.coerce.number().int().refine((d) => [0, 7, 30, 90, 365].includes(d)).default(30) })), async (c) => {
+    return c.json(await analytics(c.req.valid("query").days));
   })
 
   // Produtos: lista completa para o painel, inclusive inativos.

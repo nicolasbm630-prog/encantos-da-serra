@@ -272,3 +272,88 @@ button.adm-kpi:disabled { cursor: default; }
   .adm-tab { padding: 0 12px; min-width: 44px; justify-content: center; }
   .adm-tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
+
+/* ---------- Dashboard ---------- */
+/* Cores dos gráficos validadas (scripts/validate_palette.js) sobre a superfície dos cards (#fffcf7):
+   marrom e mel passam saturação, separação para daltonismo e contraste >= 3:1. */
+.dash { --viz-1: #8f4f1d; --viz-2: #b8860b; --viz-good: #2d6a1f; }
+.dash-body { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; transition: opacity .2s; }
+.dash-body[data-loading="true"] { opacity: .55; }
+.dash-kpis, .dash-wide { grid-column: 1 / -1; }
+@media (max-width: 900px) { .dash-body { grid-template-columns: 1fr; } }
+
+.dash-kpis { display: grid; grid-template-columns: 1.4fr repeat(4, 1fr); gap: 14px; }
+@media (max-width: 1100px) { .dash-kpis { grid-template-columns: repeat(2, 1fr); } .dash-tile.hero { grid-column: 1 / -1; } }
+.dash-tile { display: grid; gap: 4px; align-content: start; padding: 16px 18px; border-radius: var(--radius); background: var(--paper); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+.dash-tile-label { display: block; font-size: 13px; color: var(--ink-2); font-weight: 500; }
+.dash-tile b { font-family: var(--sans); font-size: 28px; font-weight: 600; line-height: 1.15; letter-spacing: -.01em; }
+.dash-tile.hero b { font-size: 48px; }
+.dash-delta { font-size: 13px; font-weight: 600; color: var(--muted); }
+.dash-delta[data-dir="up"] { color: var(--viz-good); }
+.dash-delta[data-dir="down"] { color: var(--danger); }
+
+.dash-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-content: start; padding: 18px 20px; overflow: visible; }
+.dash-card > header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.dash-card h2 { font-family: var(--sans); font-size: 16px; font-weight: 600; }
+.dash-card > header .adm-muted { font-size: 13px; }
+.dash-empty { margin: 0; padding: 24px 0; text-align: center; color: var(--muted); font-size: 14px; }
+
+/* Linha do faturamento */
+.dash-chart { position: relative; width: 100%; }
+.dash-chart svg { display: block; overflow: visible; }
+.dash-chart svg:focus-visible { outline: 3px solid var(--green-800); outline-offset: 4px; border-radius: 6px; }
+.dash-grid { stroke: var(--line); stroke-width: 1; }
+.dash-axis { stroke: var(--line-strong); stroke-width: 1; }
+.dash-tick { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; font-family: var(--sans); }
+.dash-line { fill: none; stroke: var(--viz-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.dash-area { fill: var(--viz-1); opacity: .1; }
+.dash-dot { fill: var(--viz-1); stroke: var(--paper); stroke-width: 2; }
+.dash-crosshair { stroke: var(--muted); stroke-width: 1; }
+.dash-tooltip { position: absolute; transform: translateX(12px); display: grid; gap: 2px; padding: 8px 12px; border-radius: 10px; background: var(--paper); border: 1px solid var(--line); box-shadow: var(--shadow); white-space: nowrap; pointer-events: none; font-size: 13px; color: var(--ink-2); z-index: 2; }
+.dash-tooltip b { font-size: 16px; color: var(--ink); }
+.dash-tooltip[data-side="left"] { transform: translateX(calc(-100% - 12px)); }
+
+/* Barras horizontais ordenadas */
+.dash-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.dash-bars li { display: grid; grid-template-columns: minmax(110px, 38%) 1fr; gap: 12px; align-items: center; font-size: 14px; border-radius: 6px; }
+.dash-bars li:focus-visible { outline: 3px solid var(--green-800); outline-offset: 3px; }
+.dash-bar-name { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-bar-track { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* A barra maior ocupa o espaço que sobra depois de reservar lugar para o valor na ponta. */
+.dash-bar { flex: none; width: calc((100% - 170px) * var(--w, 0)); height: 14px; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--viz-1); }
+.dash-bar[data-zero="true"] { min-width: 0; }
+.dash-bars li:hover .dash-bar { filter: brightness(1.12); }
+.dash-bar-value { flex: none; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dash-bar-value small { font-weight: 400; color: var(--muted); font-size: 12px; }
+@media (max-width: 560px) { .dash-bars li { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Barra alta varejo × atacado */
+.dash-split { display: flex; gap: 2px; height: 28px; }
+.dash-split-part { display: flex; align-items: center; padding: 0 10px; border-radius: 4px; font-size: 13px; font-weight: 600; min-width: 2px; }
+.dash-split-part[data-part="retail"] { background: var(--viz-1); color: #fff; }
+.dash-split-part[data-part="wholesale"] { background: var(--viz-2); color: #1c1309; }
+.dash-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.dash-legend li { display: grid; grid-template-columns: 14px 1fr auto; gap: 4px 10px; align-items: center; font-size: 14px; }
+.dash-legend i { width: 12px; height: 12px; border-radius: 3px; }
+.dash-legend i[data-part="retail"] { background: var(--viz-1); }
+.dash-legend i[data-part="wholesale"] { background: var(--viz-2); }
+.dash-legend b { font-variant-numeric: tabular-nums; }
+.dash-legend small { grid-column: 2 / -1; margin-top: -4px; }
+
+/* Indicadores pequenos (estoque, pendências) */
+.dash-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dash-mini-item { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-radius: 12px; background: var(--cream); }
+.dash-mini-item b { display: block; font-size: 20px; font-weight: 600; }
+.dash-mini-item small { display: block; font-size: 12px; }
+.dash-mini-item[data-status="critical"] .adm-kpi-icon { background: var(--danger-soft); color: var(--danger); }
+.dash-mini-item[data-status="warning"] .adm-kpi-icon { background: var(--gold-soft); color: #6d5410; }
+@media (max-width: 560px) { .dash-mini { grid-template-columns: 1fr; } }
+
+.dash-table summary { cursor: pointer; font-size: 13px; color: var(--ink-2); font-weight: 600; min-height: 32px; display: inline-flex; align-items: center; }
+.dash-table table { margin-top: 8px; }
+/* Itens de grid podem encolher abaixo do conteúdo (senão o gráfico e os textos longos estouram a tela). */
+.dash-body > *, .dash-kpis > * { min-width: 0; }
+@media (max-width: 560px) {
+  .dash-kpis { grid-template-columns: 1fr; }
+  .dash-tile.hero b { font-size: 40px; }
+}

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { BrandMark, Icon } from "../icons";
 import { Link, matchPath, navigate, useLocation } from "../router";
 import { useApi, useStore } from "../store";
+import { DashboardPage } from "./DashboardPage";
 import { InventoryPage } from "./InventoryPage";
 import { OrdersPage } from "./OrdersPage";
 import { ProductForm } from "./ProductForm";
@@ -9,6 +10,7 @@ import { ProductsPage } from "./ProductsPage";
 import { RoutesPage } from "./RoutesPage";
 
 const TABS = [
+  { to: "/admin/dashboard", label: "Dashboard", icon: "trending" as const },
   { to: "/admin", label: "Pedidos", icon: "receipt" as const },
   { to: "/admin/estoque", label: "Estoque", icon: "boxes" as const },
   { to: "/admin/produtos", label: "Produtos", icon: "layers" as const },
@@ -22,6 +24,7 @@ function Section({ pathname }: { pathname: string }) {
   if (pathname.startsWith("/admin/produtos")) return <ProductsPage />;
   if (pathname.startsWith("/admin/estoque")) return <InventoryPage />;
   if (pathname.startsWith("/admin/rotas")) return <RoutesPage />;
+  if (pathname.startsWith("/admin/dashboard")) return <DashboardPage />;
   return <OrdersPage />;
 }
 
@@ -34,7 +37,7 @@ export function AdminApp() {
 
   useEffect(() => {
     if (pathname.startsWith("/admin/produtos/")) return; // o formulário define o próprio título
-    const section = pathname.startsWith("/admin/estoque") ? "Estoque" : pathname.startsWith("/admin/produtos") ? "Produtos" : pathname.startsWith("/admin/rotas") ? "Rotas" : "Pedidos";
+    const section = pathname.startsWith("/admin/estoque") ? "Estoque" : pathname.startsWith("/admin/produtos") ? "Produtos" : pathname.startsWith("/admin/rotas") ? "Rotas" : pathname.startsWith("/admin/dashboard") ? "Dashboard" : "Pedidos";
     document.title = `${section} · Painel Encantos`;
   }, [pathname]);
 
