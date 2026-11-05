@@ -23,7 +23,10 @@ export type BoardOrder = {
 
 export type Board = {
   orders: BoardOrder[];
-  summary: { openOrders: number; openValueCents: number; readyToShip: number; inTransit: number; nextRoute: string | null; uncoveredOrders: number };
+  summary: {
+    openOrders: number; openValueCents: number; readyToShip: number; inTransit: number; nextRoute: string | null; uncoveredOrders: number;
+    salesCents: number; salesOrders: number; sales30dCents: number;
+  };
 };
 
 export type StockStatus = "falta" | "zerado" | "baixo" | "ok";

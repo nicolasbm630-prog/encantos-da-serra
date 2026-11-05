@@ -105,6 +105,8 @@ export function OrdersPage() {
       </div>
 
       <div className="adm-kpis">
+        <Kpi icon="dollar" label="Total de vendas" value={s ? brl(s.salesCents) : "–"}
+          hint={s ? `${s.salesOrders} ${s.salesOrders === 1 ? "pedido" : "pedidos"} · ${brl(s.sales30dCents)} nos últimos 30 dias` : undefined} />
         <Kpi icon="receipt" label="Em aberto" value={s?.openOrders ?? "–"} hint={s ? brl(s.openValueCents) : undefined} active={filter === "open"} onClick={() => setFilter("open")} />
         <Kpi icon="box" label="Sem estoque suficiente" value={s?.uncoveredOrders ?? "–"} hint={s?.uncoveredOrders ? "precisam de reposição" : "todos cobertos"} tone={s?.uncoveredOrders ? "alert" : "ok"} active={filter === "uncovered"} onClick={() => setFilter("uncovered")} />
         <Kpi icon="layers" label="Prontos para expedir" value={s?.readyToShip ?? "–"} hint={s?.nextRoute ? `próxima rota ${shortDate(s.nextRoute)}` : undefined} />

@@ -271,7 +271,11 @@ export async function ordersBoard(filter: (typeof ORDER_FILTERS)[number], q?: st
         (select coalesce(sum(total_cents), 0)::int from orders where status in ('pending', 'confirmed', 'preparing')) as "openValueCents",
         (select count(*)::int from orders where status = 'preparing') as "readyToShip",
         (select count(*)::int from orders where status = 'in_transit') as "inTransit",
-        (select min(scheduled_delivery)::text from orders where status in ('pending', 'confirmed', 'preparing')) as "nextRoute"`,
+        (select min(scheduled_delivery)::text from orders where status in ('pending', 'confirmed', 'preparing')) as "nextRoute",
+        -- Total de vendas: todo pedido que não foi cancelado (float8 para não estourar int em somas grandes).
+        (select coalesce(sum(total_cents), 0)::float8 from orders where status <> 'cancelled') as "salesCents",
+        (select count(*)::int from orders where status <> 'cancelled') as "salesOrders",
+        (select coalesce(sum(total_cents), 0)::float8 from orders where status <> 'cancelled' and created_at > now() - interval '30 days') as "sales30dCents"`,
   ]);
 
   let orders = rows.map((o: any) => {
