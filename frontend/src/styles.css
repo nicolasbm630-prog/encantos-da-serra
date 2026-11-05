@@ -606,8 +606,10 @@ textarea.input { height: auto; min-height: 110px; padding: 12px 14px; resize: ve
 .auth-form { display: flex; align-items: center; justify-content: center; padding: 48px 24px; }
 .auth-form form { width: 100%; max-width: 440px; display: grid; gap: 16px; }
 .auth-form h1 { font-size: 34px; }
-.tabs { display: inline-flex; padding: 4px; border-radius: 999px; background: var(--paper); border: 1px solid var(--line); }
-.tabs button { min-height: 40px; padding: 0 18px; border: 0; border-radius: 999px; background: transparent; font-size: 15px; font-weight: 500; color: var(--ink-2); }
+/* Seletor de duas abas (Entrar / Criar conta): metades iguais na largura do formulário. */
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 999px; background: var(--paper); border: 1px solid var(--line); }
+.tabs button { min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; background: transparent; font-size: 16px; font-weight: 500; color: var(--ink-2); }
+.tabs button:hover:not([aria-pressed="true"]) { background: var(--cream); color: var(--ink); }
 .tabs button[aria-pressed="true"] { background: var(--green-800); color: #fff; }
 @media (max-width: 900px) { .auth-wrap { grid-template-columns: 1fr; } .auth-media { display: none; } }
 

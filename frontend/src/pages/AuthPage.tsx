@@ -63,7 +63,7 @@ export function AuthPage() {
       </div>
       <div className="auth-form">
         <form onSubmit={submit} noValidate>
-          <div className="tabs" role="group">
+          <div className="tabs" role="group" aria-label="Entrar ou criar conta">
             <button type="button" aria-pressed={tab === "login"} onClick={() => setTab("login")}>Entrar</button>
             <button type="button" aria-pressed={tab === "register"} onClick={() => setTab("register")}>Criar conta</button>
           </div>
